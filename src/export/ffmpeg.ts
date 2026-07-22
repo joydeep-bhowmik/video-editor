@@ -3,8 +3,9 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { EXPORT_FPS } from "../lib/constants";
 import { computeContainSize } from "../lib/compositor";
 import { clipDuration, totalDuration } from "../lib/timeline";
-import type { Clip, Effect, SourceVideo, Track, Transition, TransitionKind } from "../types";
-import type { ExportProgress } from "./types";
+import type { Clip, Effect, TransitionKind } from "../types";
+import type { ExportRequest } from "./index";
+import { ExportCancelledError, QUALITY_PRESETS, throwIfAborted } from "./types";
 
 let ffmpegSingleton: FFmpeg | null = null;
 
@@ -120,16 +121,34 @@ interface OverlayLayer {
   end: number;
 }
 
-export async function exportFfmpeg(
-  sources: SourceVideo[],
-  tracks: Track[],
-  clips: Clip[],
-  transitions: Transition[],
-  projectWidth: number,
-  projectHeight: number,
-  onProgress: (p: ExportProgress) => void
-): Promise<Blob> {
+export async function exportFfmpeg({
+  settings,
+  sources,
+  tracks,
+  clips,
+  transitions,
+  projectWidth,
+  projectHeight,
+  onProgress,
+  signal,
+}: ExportRequest): Promise<Blob> {
   const ffmpeg = await getFFmpeg();
+  const crf = String(QUALITY_PRESETS[settings.quality].crf);
+
+  // ffmpeg.wasm runs inside a worker and exec() can't be interrupted, so cancelling means
+  // killing the worker outright. The singleton is dropped too, otherwise the next export
+  // would reuse a terminated instance.
+  const onAbort = () => {
+    try {
+      ffmpeg.terminate();
+    } finally {
+      ffmpegSingleton = null;
+    }
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+  throwIfAborted(signal);
   const sourceMap = new Map(sources.map((s) => [s.id, s]));
   const duration = totalDuration(clips);
 
@@ -155,6 +174,7 @@ export async function exportFfmpeg(
     const clip = orderedClips[i];
     const srcName = sourceFileNames.get(clip.sourceId);
     if (!srcName) continue;
+    throwIfAborted(signal);
     const partName = `part_${i}.mp4`;
     partNames.push(partName);
 
@@ -164,7 +184,7 @@ export async function exportFfmpeg(
       "-i", srcName,
       "-c:v", "libx264",
       "-preset", "veryfast",
-      "-crf", "20",
+      "-crf", crf,
       "-c:a", "aac",
       "-avoid_negative_ts", "make_zero",
       partName,
@@ -334,14 +354,24 @@ export async function exportFfmpeg(
     ...(audioLabels.length > 0 ? ["-map", "[aout]"] : ["-an"]),
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "20",
+    "-crf", crf,
     ...(audioLabels.length > 0 ? ["-c:a", "aac"] : []),
     "-t", String(duration),
     "output.mp4",
   ]);
   onProgress({ ratio: 1, stage: "done" });
 
+  throwIfAborted(signal);
   const data = await ffmpeg.readFile("output.mp4");
   const bytes = data as Uint8Array;
   return new Blob([bytes.slice()], { type: "video/mp4" });
+  } catch (err) {
+    // terminate() makes whatever exec() was in flight reject with a generic "ffmpeg is not
+    // loaded" error. That's a cancellation, not a failure — report it as one so the caller
+    // doesn't show the user an error for something they asked for.
+    if (signal?.aborted) throw new ExportCancelledError();
+    throw err;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
 }

@@ -1,20 +1,19 @@
 import type { ChangeEvent } from "react";
 import { IconButton } from "./IconButton";
-import type { ExportEngine, ExportProgress } from "../export";
+import type { ExportProgress } from "../export";
 
 interface TopBarProps {
   canUndo: boolean;
   canRedo: boolean;
   canExport: boolean;
-  exportEngine: ExportEngine;
   exportProgress: ExportProgress | null;
   importProgress: { name: string; ratio: number } | null;
   mobilePanel: "media" | "inspector" | null;
   onImport: (files: FileList) => void;
+  onCancelImport: () => void;
   onUndo: () => void;
   onRedo: () => void;
-  onExportEngineChange: (engine: ExportEngine) => void;
-  onExport: () => void;
+  onOpenExport: () => void;
   onTogglePanel: (panel: "media" | "inspector") => void;
 }
 
@@ -22,15 +21,14 @@ export function TopBar({
   canUndo,
   canRedo,
   canExport,
-  exportEngine,
   exportProgress,
   importProgress,
   mobilePanel,
   onImport,
+  onCancelImport,
   onUndo,
   onRedo,
-  onExportEngineChange,
-  onExport,
+  onOpenExport,
   onTogglePanel,
 }: TopBarProps) {
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
@@ -47,21 +45,34 @@ export function TopBar({
         <span>Studio</span>
       </div>
 
-      <label
-        className={"btn btn-primary" + (importProgress ? " is-busy" : "")}
-        data-tip="Add video or audio from your device"
-      >
-        <i className={importProgress ? "ri-loader-4-line spinning" : "ri-add-line"} aria-hidden="true" />
-        <span>{importProgress ? `${Math.round(importProgress.ratio * 100)}%` : "Add"}</span>
-        <input
-          type="file"
-          accept="video/*,audio/*"
-          multiple
-          onChange={handleFileChange}
-          disabled={importProgress !== null}
-          hidden
-        />
-      </label>
+      {importProgress ? (
+        // Swaps to a real button while busy: the idle control is a <label> wrapping a file
+        // input, so clicking it would reopen the file picker instead of stopping the import.
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={onCancelImport}
+          data-tip={`Importing ${importProgress.name} — click to cancel`}
+          aria-label="Cancel import"
+        >
+          <i className="ri-close-line" aria-hidden="true" />
+          <span className="btn-progress">{Math.round(importProgress.ratio * 100)}%</span>
+        </button>
+      ) : (
+        <label
+          className="btn btn-primary btn-icon"
+          data-tip="Add media — pick video or audio from your device"
+        >
+          <i className="ri-add-line" aria-hidden="true" />
+          <input
+            type="file"
+            accept="video/*,audio/*"
+            multiple
+            onChange={handleFileChange}
+            hidden
+          />
+        </label>
+      )}
 
       <div className="topbar-spacer" />
 
@@ -102,28 +113,15 @@ export function TopBar({
         />
       </div>
 
-      <select
-        className="engine-select"
-        value={exportEngine}
-        onChange={(e) => onExportEngineChange(e.target.value as ExportEngine)}
-        disabled={exportProgress !== null}
-        data-tip="Auto keeps sound; WebCodecs is faster but video-only"
-        aria-label="Export engine"
-      >
-        <option value="auto">Auto</option>
-        <option value="ffmpeg">FFmpeg</option>
-        <option value="webcodecs">Fast (no audio)</option>
-      </select>
-
       <button
         type="button"
-        className="btn btn-primary"
-        onClick={onExport}
-        disabled={!canExport || exportProgress !== null}
-        data-tip="Save the finished video to your device"
+        className="btn btn-primary btn-icon"
+        onClick={onOpenExport}
+        disabled={!canExport}
+        data-tip="Export — save the finished video to your device"
+        aria-label="Export"
       >
         <i className={exportProgress ? "ri-loader-4-line spinning" : "ri-download-2-line"} aria-hidden="true" />
-        <span>{exportProgress ? `${Math.round(exportProgress.ratio * 100)}%` : "Export"}</span>
       </button>
     </header>
   );

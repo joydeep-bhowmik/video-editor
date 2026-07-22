@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import "./App.css";
-import { runExport, type ExportEngine, type ExportProgress } from "./export";
+import { ExportCancelledError, runExport, type ExportProgress, type ExportSettings } from "./export";
 import {
   DEFAULT_PROJECT_HEIGHT,
   DEFAULT_PROJECT_WIDTH,
@@ -9,6 +9,7 @@ import {
   MIN_CLIP_DURATION,
 } from "./lib/constants";
 import { historyReducer, initialHistory } from "./lib/history";
+import { CancelledError } from "./lib/cancel";
 import { makeEffect, type EffectExtraKey } from "./lib/effects";
 import { loadVideoMeta } from "./lib/videoMeta";
 import { extractWaveform } from "./lib/waveform";
@@ -17,7 +18,7 @@ import { Preview } from "./components/Preview";
 import { Timeline } from "./components/Timeline";
 import { TopBar } from "./components/TopBar";
 import { ActionBar } from "./components/ActionBar";
-import { ExportOverlay } from "./components/ExportOverlay";
+import { ExportDialog } from "./components/ExportDialog";
 import { TransitionPanel, type TransitionSlot } from "./components/TransitionPanel";
 import { EffectsPanel } from "./components/EffectsPanel";
 import { InspectorPanel, type InspectorTab } from "./components/InspectorPanel";
@@ -65,7 +66,10 @@ export default function App() {
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [exportEngine, setExportEngine] = useState<ExportEngine>("auto");
+  const [exportSettings, setExportSettings] = useState<ExportSettings>({ engine: "auto", quality: "balanced" });
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const importAbortRef = useRef<AbortController | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [projectSize, setProjectSize] = useState({ width: DEFAULT_PROJECT_WIDTH, height: DEFAULT_PROJECT_HEIGHT });
   const [importProgress, setImportProgress] = useState<{ name: string; ratio: number } | null>(null);
@@ -96,13 +100,22 @@ export default function App() {
   const redo = useCallback(() => dispatch({ type: "redo" }), []);
 
   async function handleImport(files: FileList) {
+    const controller = new AbortController();
+    importAbortRef.current = controller;
+    const signal = controller.signal;
+
     for (const file of Array.from(files)) {
+      if (signal.aborted) break;
       setImportProgress({ name: file.name, ratio: 0 });
       try {
         const url = URL.createObjectURL(file);
-        const meta = await loadVideoMeta(url, (ratio) => setImportProgress({ name: file.name, ratio: ratio * 0.7 }));
+        const meta = await loadVideoMeta(
+          url,
+          (ratio) => setImportProgress({ name: file.name, ratio: ratio * 0.7 }),
+          signal
+        );
         setImportProgress({ name: file.name, ratio: 0.75 });
-        const waveform = await extractWaveform(file);
+        const waveform = await extractWaveform(file, signal);
         const sourceId = crypto.randomUUID();
 
         setSources((prev) => {
@@ -126,11 +139,18 @@ export default function App() {
           ];
         });
       } catch (err) {
+        // Cancelling is a normal outcome; stop quietly rather than reporting a failure.
+        if (err instanceof CancelledError) break;
         console.error("import failed", err);
         alert(`Failed to import ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    importAbortRef.current = null;
     setImportProgress(null);
+  }
+
+  function handleCancelImport() {
+    importAbortRef.current?.abort();
   }
 
   function handleAddClip(sourceId: string, trackId: string, dropTime: number) {
@@ -502,30 +522,43 @@ export default function App() {
 
   async function handleExport() {
     if (clips.length === 0 || exportProgress) return;
-    setExportProgress({ ratio: 0, stage: "starting" });
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    setExportProgress({ ratio: 0, stage: "Getting ready…" });
     try {
-      const blob = await runExport(
-        exportEngine,
+      const blob = await runExport({
+        settings: exportSettings,
         sources,
         tracks,
         clips,
         transitions,
-        projectSize.width,
-        projectSize.height,
-        setExportProgress
-      );
+        projectWidth: projectSize.width,
+        projectHeight: projectSize.height,
+        onProgress: setExportProgress,
+        signal: controller.signal,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "export.mp4";
       a.click();
       URL.revokeObjectURL(url);
+      setExportOpen(false);
     } catch (err) {
-      console.error("export failed", err);
-      alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Cancelling is a normal outcome, not a failure — leave the dialog open so the user can
+      // adjust settings and try again.
+      if (!(err instanceof ExportCancelledError)) {
+        console.error("export failed", err);
+        alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
+      exportAbortRef.current = null;
       setExportProgress(null);
     }
+  }
+
+  function handleCancelExport() {
+    exportAbortRef.current?.abort();
   }
 
   useEffect(() => {
@@ -586,15 +619,14 @@ export default function App() {
         canExport={clips.length > 0}
         canUndo={canUndo}
         canRedo={canRedo}
-        exportEngine={exportEngine}
         exportProgress={exportProgress}
         importProgress={importProgress}
         mobilePanel={mobilePanel}
         onImport={handleImport}
+        onCancelImport={handleCancelImport}
         onUndo={undo}
         onRedo={redo}
-        onExportEngineChange={setExportEngine}
-        onExport={handleExport}
+        onOpenExport={() => setExportOpen(true)}
         onTogglePanel={(p) => setMobilePanel((cur) => (cur === p ? null : p))}
       />
       <div className="app-body">
@@ -690,7 +722,19 @@ export default function App() {
         />
       </div>
 
-      {exportProgress && <ExportOverlay progress={exportProgress} />}
+      {(exportOpen || exportProgress) && (
+        <ExportDialog
+          settings={exportSettings}
+          progress={exportProgress}
+          projectWidth={projectSize.width}
+          projectHeight={projectSize.height}
+          duration={duration}
+          onChange={setExportSettings}
+          onStart={handleExport}
+          onCancel={handleCancelExport}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
     </div>
   );
 }

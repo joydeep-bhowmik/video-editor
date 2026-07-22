@@ -1,3 +1,5 @@
+import { throwIfAborted } from "./cancel";
+
 export interface VideoMeta {
   duration: number;
   thumbnail: string;
@@ -61,8 +63,10 @@ function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
 
 export async function loadVideoMeta(
   url: string,
-  onProgress?: (ratio: number) => void
+  onProgress?: (ratio: number) => void,
+  signal?: AbortSignal
 ): Promise<VideoMeta> {
+  throwIfAborted(signal);
   const video = document.createElement("video");
   video.preload = "auto";
   video.muted = true;
@@ -75,6 +79,7 @@ export async function loadVideoMeta(
     }),
     "timed out loading video metadata"
   );
+  throwIfAborted(signal);
   onProgress?.(1 / TOTAL_STEPS);
 
   const duration = video.duration;
@@ -92,6 +97,7 @@ export async function loadVideoMeta(
 
   const filmstrip: string[] = [];
   for (let i = 0; i < FILMSTRIP_COUNT; i++) {
+    throwIfAborted(signal);
     const t = duration ? (duration * i) / (FILMSTRIP_COUNT - 1) : 0;
     try {
       await seekTo(video, Math.min(t, Math.max(0, duration - 0.05)));

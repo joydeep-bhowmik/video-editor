@@ -4,8 +4,9 @@ import { drawFrame } from "../lib/compositor";
 import { findActiveClip, totalDuration } from "../lib/timeline";
 import { findTransitionAt } from "../lib/transitions";
 import { getClipVideo } from "../lib/videoPool";
-import type { Clip, SourceVideo, Track, Transition } from "../types";
-import type { ExportProgress } from "./types";
+import type { Clip } from "../types";
+import type { ExportRequest } from "./index";
+import { QUALITY_PRESETS, throwIfAborted } from "./types";
 
 function seekIfNeeded(video: HTMLVideoElement, time: number): Promise<void> {
   if (Math.abs(video.currentTime - time) < 0.008) return Promise.resolve();
@@ -23,15 +24,17 @@ function waitFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-export async function exportWebCodecs(
-  sources: SourceVideo[],
-  tracks: Track[],
-  clips: Clip[],
-  transitions: Transition[],
-  projectWidth: number,
-  projectHeight: number,
-  onProgress: (p: ExportProgress) => void
-): Promise<Blob> {
+export async function exportWebCodecs({
+  settings,
+  sources,
+  tracks,
+  clips,
+  transitions,
+  projectWidth,
+  projectHeight,
+  onProgress,
+  signal,
+}: ExportRequest): Promise<Blob> {
   const sourceMap = new Map(sources.map((s) => [s.id, s]));
   const duration = totalDuration(clips);
 
@@ -54,7 +57,7 @@ export async function exportWebCodecs(
     codec: "avc1.420034",
     width: projectWidth,
     height: projectHeight,
-    bitrate: 6_000_000,
+    bitrate: QUALITY_PRESETS[settings.quality].bitrate,
     framerate: EXPORT_FPS,
   };
   const support = await VideoEncoder.isConfigSupported(encoderConfig);
@@ -74,6 +77,11 @@ export async function exportWebCodecs(
   let frameIndex = 0;
 
   for (let t = 0; t < duration; t += frameStep) {
+    if (signal?.aborted) {
+      // Tear the encoder down so its worker doesn't keep running after we bail.
+      encoder.close();
+      throwIfAborted(signal);
+    }
     const seeks: Promise<void>[] = [];
     for (const track of tracks) {
       if (track.kind === "audio") continue; // this export path is video-only; no need to seek audio-only tracks

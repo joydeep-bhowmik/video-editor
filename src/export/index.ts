@@ -1,24 +1,24 @@
 import type { Clip, SourceVideo, Track, Transition } from "../types";
 import { exportFfmpeg } from "./ffmpeg";
 import { exportWebCodecs } from "./webcodecs";
-import { resolveEngine, type ExportEngine, type ExportProgress } from "./types";
+import { resolveEngine, type ExportProgress, type ExportSettings } from "./types";
 
-export type { ExportEngine, ExportProgress } from "./types";
-export { webCodecsSupported } from "./types";
+export type { ExportEngine, ExportProgress, ExportQuality, ExportSettings } from "./types";
+export { webCodecsSupported, ExportCancelledError } from "./types";
 
-export async function runExport(
-  engine: ExportEngine,
-  sources: SourceVideo[],
-  tracks: Track[],
-  clips: Clip[],
-  transitions: Transition[],
-  projectWidth: number,
-  projectHeight: number,
-  onProgress: (p: ExportProgress) => void
-): Promise<Blob> {
-  const resolved = resolveEngine(engine);
-  if (resolved === "webcodecs") {
-    return exportWebCodecs(sources, tracks, clips, transitions, projectWidth, projectHeight, onProgress);
-  }
-  return exportFfmpeg(sources, tracks, clips, transitions, projectWidth, projectHeight, onProgress);
+export interface ExportRequest {
+  settings: ExportSettings;
+  sources: SourceVideo[];
+  tracks: Track[];
+  clips: Clip[];
+  transitions: Transition[];
+  projectWidth: number;
+  projectHeight: number;
+  onProgress: (p: ExportProgress) => void;
+  signal?: AbortSignal;
+}
+
+export async function runExport(request: ExportRequest): Promise<Blob> {
+  const resolved = resolveEngine(request.settings.engine);
+  return resolved === "webcodecs" ? exportWebCodecs(request) : exportFfmpeg(request);
 }
