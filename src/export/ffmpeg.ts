@@ -72,9 +72,16 @@ function effectFilters(effects: Effect[]): string[] {
       case "black-white":
         out.push(`hue=s=${(1 - Math.min(1, i)).toFixed(3)}`);
         break;
-      case "green-screen":
-        out.push(`chromakey=0x00FF00:${(0.1 + i * 0.4).toFixed(3)}:0.1`);
+      case "green-screen": {
+        // Mirrors the canvas keyer: soft matte via chromakey's blend parameter, then a despill
+        // pass — without despill the surviving edge pixels keep a green fringe.
+        const similarity = (0.05 + i * 0.45).toFixed(3);
+        const blend = Math.max(0.001, (e.softness ?? 0.35) * 0.35).toFixed(3);
+        out.push(`chromakey=0x00FF00:${similarity}:${blend}`);
+        const spill = e.spill ?? 0.85;
+        if (spill > 0) out.push(`despill=type=green:mix=${spill.toFixed(2)}:expand=0`);
         break;
+      }
       case "vignette":
         out.push(`vignette=angle=${(Math.PI / 5 + i * (Math.PI / 5)).toFixed(4)}`);
         break;

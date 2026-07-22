@@ -9,7 +9,7 @@ import {
   MIN_CLIP_DURATION,
 } from "./lib/constants";
 import { historyReducer, initialHistory } from "./lib/history";
-import { makeEffect } from "./lib/effects";
+import { makeEffect, type EffectExtraKey } from "./lib/effects";
 import { loadVideoMeta } from "./lib/videoMeta";
 import { extractWaveform } from "./lib/waveform";
 import { MediaPool } from "./components/MediaPool";
@@ -308,6 +308,17 @@ export default function App() {
       ...prev,
       clips: prev.clips.map((c) =>
         c.id === clipId ? { ...c, effects: c.effects.filter((e) => e.id !== effectId) } : c
+      ),
+    }));
+  }
+
+  function handleEffectExtra(clipId: string, effectId: string, key: EffectExtraKey, value: number) {
+    updateLive((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) =>
+        c.id === clipId
+          ? { ...c, effects: c.effects.map((e) => (e.id === effectId ? { ...e, [key]: value } : e)) }
+          : c
       ),
     }));
   }
@@ -660,6 +671,7 @@ export default function App() {
               onAdd={(kind) => selectedClipId && handleAddEffect(selectedClipId, kind)}
               onRemove={(effectId) => selectedClipId && handleRemoveEffect(selectedClipId, effectId)}
               onIntensity={(effectId, v) => selectedClipId && handleEffectIntensity(selectedClipId, effectId, v)}
+              onExtra={(effectId, key, v) => selectedClipId && handleEffectExtra(selectedClipId, effectId, key, v)}
               onBeginEdit={beginLiveEdit}
               onEndEdit={endLiveEdit}
             />

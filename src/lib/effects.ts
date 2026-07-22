@@ -1,5 +1,7 @@
 import type { Effect, EffectKind } from "../types";
 
+export type EffectExtraKey = "softness" | "spill";
+
 export interface EffectDef {
   kind: EffectKind;
   label: string;
@@ -8,11 +10,27 @@ export interface EffectDef {
   /** Label for the intensity slider, so it reads meaningfully per effect. */
   amountLabel: string;
   defaultIntensity: number;
+  /** Extra sliders beyond intensity — only the chroma keyer needs these today. */
+  extras?: { key: EffectExtraKey; label: string; default: number }[];
 }
 
 export const EFFECT_CATALOG: EffectDef[] = [
   { kind: "blur", label: "Blur", icon: "ri-blur-off-line", hint: "Soften the whole picture", amountLabel: "Amount", defaultIntensity: 0.3 },
-  { kind: "green-screen", label: "Green Screen", icon: "ri-contrast-drop-line", hint: "Cut out a green background", amountLabel: "Tolerance", defaultIntensity: 0.4 },
+  {
+    kind: "green-screen",
+    label: "Green Screen",
+    icon: "ri-contrast-drop-line",
+    hint: "Cut out a green background",
+    amountLabel: "Tolerance",
+    defaultIntensity: 0.4,
+    extras: [
+      { key: "softness", label: "Edge feather", default: 0.35 },
+      // Measured on a synthetic anti-aliased edge: worst-case green excess is 82 with no
+      // despill, 25 at 0.7, ~0 at 1.0. Default sits high so edges look clean out of the box,
+      // but short of 1.0 so genuinely green subjects aren't fully desaturated.
+      { key: "spill", label: "Spill removal", default: 0.85 },
+    ],
+  },
   { kind: "glow", label: "Glow", icon: "ri-sun-line", hint: "Dreamy bloom around bright areas", amountLabel: "Strength", defaultIntensity: 0.45 },
   { kind: "shadow", label: "Shadow", icon: "ri-shadow-line", hint: "Drop shadow behind the clip", amountLabel: "Size", defaultIntensity: 0.4 },
   { kind: "black-white", label: "Black & White", icon: "ri-contrast-2-line", hint: "Drain the colour out", amountLabel: "Strength", defaultIntensity: 1 },
@@ -26,7 +44,10 @@ export const EFFECT_CATALOG: EffectDef[] = [
 export const EFFECT_BY_KIND = new Map(EFFECT_CATALOG.map((e) => [e.kind, e]));
 
 export function makeEffect(kind: EffectKind): Effect {
-  return { id: crypto.randomUUID(), kind, intensity: EFFECT_BY_KIND.get(kind)?.defaultIntensity ?? 0.5 };
+  const def = EFFECT_BY_KIND.get(kind);
+  const effect: Effect = { id: crypto.randomUUID(), kind, intensity: def?.defaultIntensity ?? 0.5 };
+  for (const extra of def?.extras ?? []) effect[extra.key] = extra.default;
+  return effect;
 }
 
 // --- rendering ---------------------------------------------------------------
@@ -105,21 +126,67 @@ function getGrainTile(): HTMLCanvasElement {
   return c;
 }
 
-/** Chroma-key: knock out pixels close to pure green. */
-function applyGreenScreen(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
+// BT.601 chroma coordinates of pure green — the key colour, in the plane where "how green is
+// this?" is independent of brightness. Keying on chroma rather than raw RGB means shadows and
+// highlights on the same green cloth still key out together.
+const KEY_CB = -0.331264 * 255 + 128;
+const KEY_CR = -0.418688 * 255 + 128;
+
+function smoothstep(t: number) {
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Chroma key with a soft matte and spill suppression.
+ *
+ * The naive version of this — flip alpha to 0 when green dominates — is what leaves a green
+ * fringe. Two things cause it, and both are handled here:
+ *
+ *  1. Edge pixels are *partly* background. Chroma subsampling (4:2:0), anti-aliasing and motion
+ *     blur all blend subject and screen together, so a hard on/off test keeps those pixels fully
+ *     opaque and green-tinted. Instead alpha ramps smoothly across a band, giving a real matte.
+ *  2. Even correctly-kept pixels pick up green bounce from the screen. So after keying, any pixel
+ *     whose green still outweighs its red/blue average gets that excess pulled back down.
+ */
+function applyGreenScreen(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  intensity: number,
+  softness: number,
+  spill: number
+) {
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
-  // Wider tolerance as intensity rises.
-  const tolerance = 40 + intensity * 140;
+
+  // Everything closer to the key than `similarity` is background; the ramp to
+  // `similarity + blend` is the soft edge.
+  const similarity = 0.05 + intensity * 0.45;
+  const blend = Math.max(0.001, softness * 0.35);
+
   for (let i = 0; i < d.length; i += 4) {
     const r = d[i];
     const g = d[i + 1];
     const b = d[i + 2];
-    // Green is "dominant" when it clearly outweighs both other channels.
-    if (g - Math.max(r, b) > 255 - tolerance) {
-      d[i + 3] = 0;
+
+    const cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
+    const cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
+    const dist = Math.hypot(cb - KEY_CB, cr - KEY_CR) / 255;
+
+    let alpha: number;
+    if (dist <= similarity) alpha = 0;
+    else if (dist >= similarity + blend) alpha = 1;
+    else alpha = smoothstep((dist - similarity) / blend);
+
+    if (alpha > 0 && spill > 0) {
+      // Green above the red/blue average is screen bounce, not real colour.
+      const limit = (r + b) * 0.5;
+      if (g > limit) d[i + 1] = g + (limit - g) * spill;
     }
+
+    d[i + 3] = d[i + 3] * alpha;
   }
+
   ctx.putImageData(img, 0, 0);
 }
 
@@ -271,7 +338,9 @@ export function renderEffects(
 
   // Order matters: key out the background before anything paints over it.
   const green = has("green-screen");
-  if (green) applyGreenScreen(src.ctx, w, h, green.intensity);
+  if (green) {
+    applyGreenScreen(src.ctx, w, h, green.intensity, green.softness ?? 0.35, green.spill ?? 0.85);
+  }
 
   const sharpen = has("sharpen");
   if (sharpen) applySharpen(src, w, h, sharpen.intensity);

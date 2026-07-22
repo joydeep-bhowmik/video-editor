@@ -1,4 +1,4 @@
-import { EFFECT_BY_KIND, EFFECT_CATALOG } from "../lib/effects";
+import { EFFECT_BY_KIND, EFFECT_CATALOG, type EffectExtraKey } from "../lib/effects";
 import type { Clip, EffectKind } from "../types";
 
 interface EffectsPanelProps {
@@ -6,6 +6,7 @@ interface EffectsPanelProps {
   onAdd: (kind: EffectKind) => void;
   onRemove: (effectId: string) => void;
   onIntensity: (effectId: string, intensity: number) => void;
+  onExtra: (effectId: string, key: EffectExtraKey, value: number) => void;
   onBeginEdit: () => void;
   onEndEdit: () => void;
 }
@@ -15,6 +16,7 @@ export function EffectsPanel({
   onAdd,
   onRemove,
   onIntensity,
+  onExtra,
   onBeginEdit,
   onEndEdit,
 }: EffectsPanelProps) {
@@ -63,6 +65,25 @@ export function EffectsPanel({
                   />
                   <span className="effect-value">{Math.round(effect.intensity * 100)}%</span>
                 </label>
+
+                {def?.extras?.map((extra) => {
+                  const value = effect[extra.key] ?? extra.default;
+                  return (
+                    <label className="effect-slider-row" key={extra.key}>
+                      <span>{extra.label}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={Math.round(value * 100)}
+                        onPointerDown={onBeginEdit}
+                        onPointerUp={onEndEdit}
+                        onChange={(e) => onExtra(effect.id, extra.key, Number(e.target.value) / 100)}
+                      />
+                      <span className="effect-value">{Math.round(value * 100)}%</span>
+                    </label>
+                  );
+                })}
               </div>
             );
           })}

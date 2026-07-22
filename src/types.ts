@@ -48,6 +48,10 @@ export interface Effect {
   kind: EffectKind;
   /** 0..1, meaning is per-effect (blur radius, key tolerance, grain amount, …). */
   intensity: number;
+  /** Width of the soft alpha ramp at the key edge. Chroma key only. */
+  softness?: number;
+  /** How hard to pull green tint out of the pixels that survive. Chroma key only. */
+  spill?: number;
 }
 
 export interface Clip {
