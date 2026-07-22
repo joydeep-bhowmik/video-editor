@@ -1,0 +1,26 @@
+:root {
+  --bg: #16171d;
+  --panel: #1f2028;
+  --border: #2e303a;
+  --text: #d4d4d8;
+  --text-dim: #8a8b96;
+  --accent: #c084fc;
+
+  color-scheme: dark;
+  font: 14px/1.4 system-ui, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}

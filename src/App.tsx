@@ -1,0 +1,547 @@
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import "./App.css";
+import { runExport, type ExportEngine, type ExportProgress } from "./export";
+import {
+  DEFAULT_PROJECT_HEIGHT,
+  DEFAULT_PROJECT_WIDTH,
+  DEFAULT_TRANSFORM_BASE,
+  DEFAULT_TRANSFORM_OVERLAY,
+  MIN_CLIP_DURATION,
+} from "./lib/constants";
+import { historyReducer, initialHistory } from "./lib/history";
+import { loadVideoMeta } from "./lib/videoMeta";
+import { extractWaveform } from "./lib/waveform";
+import { MediaPool } from "./components/MediaPool";
+import { Preview } from "./components/Preview";
+import { Timeline } from "./components/Timeline";
+import { Toolbar } from "./components/Toolbar";
+import { TransitionPanel, type TransitionSlot } from "./components/TransitionPanel";
+import { clampClipStart, isClipActiveAt, maxClipDurationAt, splitClipAt, totalDuration } from "./lib/timeline";
+import { applyTransition, DEFAULT_TRANSITION_DURATION, retimeTransition } from "./lib/transitions";
+import type { Clip, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
+
+const FRAME_STEP = 1 / 30;
+
+function makeTrack(index: number, kind: Track["kind"] = "video"): Track {
+  return {
+    id: crypto.randomUUID(),
+    name: kind === "audio" ? `Audio ${index}` : `Track ${index}`,
+    kind,
+    muted: false,
+  };
+}
+
+interface EditState {
+  tracks: Track[];
+  clips: Clip[];
+  transitions: Transition[];
+}
+
+export default function App() {
+  const [sources, setSources] = useState<SourceVideo[]>([]);
+  const [history, dispatch] = useReducer(historyReducer<EditState>, undefined, () =>
+    initialHistory<EditState>({ tracks: [makeTrack(1)], clips: [], transitions: [] })
+  );
+  const { tracks, clips, transitions } = history.present;
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
+
+  const [activeTransitionSlot, setActiveTransitionSlot] = useState<TransitionSlot | null>(null);
+  const [playhead, setPlayhead] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [exportEngine, setExportEngine] = useState<ExportEngine>("auto");
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  const [projectSize, setProjectSize] = useState({ width: DEFAULT_PROJECT_WIDTH, height: DEFAULT_PROJECT_HEIGHT });
+  const [importProgress, setImportProgress] = useState<{ name: string; ratio: number } | null>(null);
+
+  const duration = totalDuration(clips);
+
+  function commitEdit(updater: (prev: EditState) => EditState) {
+    dispatch({ type: "commit", updater });
+  }
+
+  // Continuous drags (clip move/trim, gizmo transform) call beginLiveEdit once at drag start,
+  // updateLive on every pointermove, endLiveEdit once at drag end — so a whole drag gesture
+  // collapses into a single undo step instead of one per animation frame.
+  const dragSnapshotRef = useRef<EditState | null>(null);
+  function beginLiveEdit() {
+    dragSnapshotRef.current = history.present;
+  }
+  function updateLive(updater: (prev: EditState) => EditState) {
+    dispatch({ type: "replace", updater });
+  }
+  function endLiveEdit() {
+    if (dragSnapshotRef.current) {
+      dispatch({ type: "snapshotCommit", snapshot: dragSnapshotRef.current });
+      dragSnapshotRef.current = null;
+    }
+  }
+  const undo = useCallback(() => dispatch({ type: "undo" }), []);
+  const redo = useCallback(() => dispatch({ type: "redo" }), []);
+
+  async function handleImport(files: FileList) {
+    for (const file of Array.from(files)) {
+      setImportProgress({ name: file.name, ratio: 0 });
+      try {
+        const url = URL.createObjectURL(file);
+        const meta = await loadVideoMeta(url, (ratio) => setImportProgress({ name: file.name, ratio: ratio * 0.7 }));
+        setImportProgress({ name: file.name, ratio: 0.75 });
+        const waveform = await extractWaveform(file);
+        const sourceId = crypto.randomUUID();
+
+        setSources((prev) => {
+          if (prev.length === 0 && meta.width && meta.height) {
+            setProjectSize({ width: meta.width, height: meta.height });
+          }
+          return [
+            ...prev,
+            {
+              id: sourceId,
+              url,
+              name: file.name,
+              duration: meta.duration,
+              thumbnail: meta.thumbnail,
+              filmstrip: meta.filmstrip,
+              waveform,
+              width: meta.width,
+              height: meta.height,
+              file,
+            },
+          ];
+        });
+      } catch (err) {
+        console.error("import failed", err);
+        alert(`Failed to import ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    setImportProgress(null);
+  }
+
+  function handleAddClip(sourceId: string, trackId: string, start: number) {
+    const source = sources.find((s) => s.id === sourceId);
+    if (!source) return;
+    const trackIndex = tracks.findIndex((t) => t.id === trackId);
+    const isBaseTrack = trackIndex <= 0;
+    const clipId = crypto.randomUUID();
+    const clampedStart = clampClipStart(clips, trackId, clipId, Math.max(0, start), source.duration);
+
+    const newClip: Clip = {
+      id: clipId,
+      trackId,
+      sourceId,
+      start: clampedStart,
+      inPoint: 0,
+      outPoint: source.duration,
+      transform: { ...(isBaseTrack ? DEFAULT_TRANSFORM_BASE : DEFAULT_TRANSFORM_OVERLAY) },
+      audioMuted: false,
+    };
+
+    commitEdit((prev) => ({ ...prev, clips: [...prev.clips, newClip] }));
+    setSelectedClipId(clipId);
+    setIsPlaying(false);
+    setPlayhead(clampedStart);
+  }
+
+  function handleMoveClip(id: string, trackId: string, start: number) {
+    updateLive((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => (c.id === id ? { ...c, trackId, start } : c)),
+    }));
+  }
+
+  function handleTransformClip(id: string, transform: Transform) {
+    updateLive((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => (c.id === id ? { ...c, transform } : c)),
+    }));
+  }
+
+  function handleTrimClip(id: string, inPoint: number, outPoint: number) {
+    updateLive((prev) => {
+      const clip = prev.clips.find((c) => c.id === id);
+      if (!clip) return prev;
+      // Both trim edges extend the clip rightward from its fixed start, so stop it at the
+      // next clip on the track rather than letting the two overlap.
+      const maxDur = maxClipDurationAt(prev.clips, clip.trackId, id, clip.start);
+      const clampedOut = Math.min(outPoint, inPoint + maxDur);
+      if (clampedOut - inPoint < MIN_CLIP_DURATION) return prev;
+      return { ...prev, clips: prev.clips.map((c) => (c.id === id ? { ...c, inPoint, outPoint: clampedOut } : c)) };
+    });
+  }
+
+  function handleAddTrack(refTrackId?: string, position?: "above" | "below") {
+    commitEdit((prev) => {
+      const newTrack = makeTrack(prev.tracks.length + 1);
+      const refIndex = refTrackId ? prev.tracks.findIndex((t) => t.id === refTrackId) : -1;
+      if (refIndex === -1) return { ...prev, tracks: [...prev.tracks, newTrack] };
+      const insertAt = position === "below" ? refIndex : refIndex + 1;
+      const nextTracks = [...prev.tracks];
+      nextTracks.splice(insertAt, 0, newTrack);
+      return { ...prev, tracks: nextTracks };
+    });
+  }
+
+  function handleDeleteTrack(trackId: string) {
+    commitEdit((prev) =>
+      prev.tracks.length <= 1 ? prev : { ...prev, tracks: prev.tracks.filter((t) => t.id !== trackId) }
+    );
+  }
+
+  function handleToggleTrackMute(trackId: string) {
+    commitEdit((prev) => ({
+      ...prev,
+      tracks: prev.tracks.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t)),
+    }));
+  }
+
+  function handleToggleClipMute(clipId: string) {
+    commitEdit((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => (c.id === clipId ? { ...c, audioMuted: !c.audioMuted } : c)),
+    }));
+  }
+
+  function handleExtractAudio(clipId: string) {
+    const clip = clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    const audioTrackNumber = tracks.filter((t) => t.kind === "audio").length + 1;
+    const newTrack = makeTrack(audioTrackNumber, "audio");
+    const newClip: Clip = {
+      ...clip,
+      id: crypto.randomUUID(),
+      trackId: newTrack.id,
+      transform: { ...DEFAULT_TRANSFORM_BASE },
+      audioMuted: false,
+    };
+    commitEdit((prev) => ({
+      tracks: [...prev.tracks, newTrack],
+      clips: [...prev.clips.map((c) => (c.id === clipId ? { ...c, audioMuted: true } : c)), newClip],
+      transitions: prev.transitions,
+    }));
+  }
+
+  function handleSelectTransitionSlot(slot: TransitionSlot) {
+    setActiveTransitionSlot((prev) =>
+      prev && prev.leftClipId === slot.leftClipId && prev.rightClipId === slot.rightClipId ? null : slot
+    );
+  }
+
+  function handleApplyTransition(kind: TransitionKind) {
+    const slot = activeTransitionSlot;
+    if (!slot) return;
+    const existing = transitions.find((t) => t.leftClipId === slot.leftClipId && t.rightClipId === slot.rightClipId);
+    const transitionDuration = existing?.duration ?? DEFAULT_TRANSITION_DURATION;
+
+    commitEdit((prev) => {
+      const { clips: nextClips, transition } = applyTransition(
+        prev.clips,
+        slot.trackId,
+        slot.leftClipId,
+        slot.rightClipId,
+        kind,
+        transitionDuration
+      );
+      return {
+        ...prev,
+        clips: nextClips,
+        transitions: [...prev.transitions.filter((t) => t.id !== existing?.id), transition],
+      };
+    });
+
+    setIsPlaying(false);
+    const leftClip = clips.find((c) => c.id === slot.leftClipId);
+    if (leftClip) {
+      const leftEnd = leftClip.start + (leftClip.outPoint - leftClip.inPoint);
+      setPlayhead(leftEnd - transitionDuration / 2);
+    }
+  }
+
+  function handleRemoveTransition(id: string) {
+    commitEdit((prev) => ({ ...prev, transitions: prev.transitions.filter((t) => t.id !== id) }));
+  }
+
+  function handleTransitionDuration(id: string, newDuration: number) {
+    commitEdit((prev) => {
+      const transition = prev.transitions.find((t) => t.id === id);
+      if (!transition) return prev;
+      const clampedDuration = Math.max(MIN_CLIP_DURATION, newDuration);
+      const nextClips = retimeTransition(prev.clips, transition, clampedDuration);
+      return {
+        ...prev,
+        clips: nextClips,
+        transitions: prev.transitions.map((t) => (t.id === id ? { ...t, duration: clampedDuration } : t)),
+      };
+    });
+  }
+
+  function handleTransitionWindow(id: string, field: "in" | "out", value: number) {
+    commitEdit((prev) => {
+      const transition = prev.transitions.find((t) => t.id === id);
+      if (!transition) return prev;
+      const rightClip = prev.clips.find((c) => c.id === transition.rightClipId);
+      if (!rightClip) return prev;
+
+      const currentStart = rightClip.start;
+      const currentEnd = rightClip.start + transition.duration;
+      let newStart = currentStart;
+      let newDuration = transition.duration;
+
+      if (field === "in") {
+        newStart = Math.max(0, Math.min(value, currentEnd - MIN_CLIP_DURATION));
+        newDuration = currentEnd - newStart;
+      } else {
+        const newEnd = Math.max(currentStart + MIN_CLIP_DURATION, value);
+        newDuration = newEnd - currentStart;
+      }
+
+      return {
+        ...prev,
+        clips: prev.clips.map((c) => (c.id === rightClip.id ? { ...c, start: newStart } : c)),
+        transitions: prev.transitions.map((t) => (t.id === id ? { ...t, duration: newDuration } : t)),
+      };
+    });
+  }
+
+  function handleSelectClip(id: string | null) {
+    setSelectedClipId(id);
+    if (!id) return;
+    const clip = clips.find((c) => c.id === id);
+    if (clip && !isClipActiveAt(clip, playhead)) {
+      setIsPlaying(false);
+      setPlayhead(clip.start);
+    }
+  }
+
+  function handleTogglePlay() {
+    setIsPlaying((playing) => {
+      if (!playing && playhead >= duration) {
+        setPlayhead(0);
+      }
+      return !playing;
+    });
+  }
+
+  function handleSeek(t: number) {
+    setIsPlaying(false);
+    setPlayhead(Math.max(0, Math.min(t, duration)));
+  }
+
+  const handleSplit = useCallback(() => {
+    if (!selectedClipId) return;
+    const result = splitClipAt(clips, selectedClipId, playhead);
+    if (!result) return;
+    const index = clips.findIndex((c) => c.id === selectedClipId);
+    commitEdit((prev) => {
+      const next = [...prev.clips];
+      next.splice(index, 1, result.first, result.second);
+      return { ...prev, clips: next };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playhead, selectedClipId, clips]);
+
+  // "Cut here and add a transition": splits the selected clip at the playhead, then immediately
+  // applies a default cross-dissolve between the two new halves — the one-step version of
+  // manually splitting (S) and then picking a transition in the panel.
+  const handleCutAndAddTransition = useCallback(() => {
+    if (!selectedClipId) return;
+    const result = splitClipAt(clips, selectedClipId, playhead);
+    if (!result) return;
+    const clip = clips.find((c) => c.id === selectedClipId);
+    if (!clip) return;
+    const index = clips.findIndex((c) => c.id === selectedClipId);
+    const trackId = clip.trackId;
+
+    commitEdit((prev) => {
+      const nextClips = [...prev.clips];
+      nextClips.splice(index, 1, result.first, result.second);
+      const { clips: withTransition, transition } = applyTransition(
+        nextClips,
+        trackId,
+        result.first.id,
+        result.second.id,
+        "fade-cross",
+        DEFAULT_TRANSITION_DURATION
+      );
+      return { ...prev, clips: withTransition, transitions: [...prev.transitions, transition] };
+    });
+
+    setActiveTransitionSlot({ trackId, leftClipId: result.first.id, rightClipId: result.second.id });
+    setIsPlaying(false);
+    setPlayhead(playhead - DEFAULT_TRANSITION_DURATION / 2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playhead, selectedClipId, clips]);
+
+  const handleDelete = useCallback(() => {
+    if (!selectedClipId) return;
+    commitEdit((prev) => ({
+      ...prev,
+      clips: prev.clips.filter((c) => c.id !== selectedClipId),
+      transitions: prev.transitions.filter((t) => t.leftClipId !== selectedClipId && t.rightClipId !== selectedClipId),
+    }));
+    setActiveTransitionSlot((prev) =>
+      prev && (prev.leftClipId === selectedClipId || prev.rightClipId === selectedClipId) ? null : prev
+    );
+    setSelectedClipId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClipId]);
+
+  async function handleExport() {
+    if (clips.length === 0 || exportProgress) return;
+    setExportProgress({ ratio: 0, stage: "starting" });
+    try {
+      const blob = await runExport(
+        exportEngine,
+        sources,
+        tracks,
+        clips,
+        transitions,
+        projectSize.width,
+        projectSize.height,
+        setExportProgress
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "export.mp4";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("export failed", err);
+      alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExportProgress(null);
+    }
+  }
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        handleTogglePlay();
+      } else if (e.key === "t" || e.key === "T") {
+        handleCutAndAddTransition();
+      } else if (e.key === "s" || e.key === "S") {
+        handleSplit();
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        handleDelete();
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const step = e.shiftKey ? 1 : FRAME_STEP;
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        handleSeek(playhead + dir * step);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSplit, handleCutAndAddTransition, handleDelete, undo, redo, playhead, duration]);
+
+  const selectedClip = clips.find((c) => c.id === selectedClipId);
+  const canSplit = !!selectedClip && isClipActiveAt(selectedClip, playhead);
+  const activeTransition = activeTransitionSlot
+    ? transitions.find(
+        (t) => t.leftClipId === activeTransitionSlot.leftClipId && t.rightClipId === activeTransitionSlot.rightClipId
+      )
+    : undefined;
+  const activeTransitionWindow = (() => {
+    if (!activeTransition) return undefined;
+    const rightClip = clips.find((c) => c.id === activeTransition.rightClipId);
+    if (!rightClip) return undefined;
+    return { start: rightClip.start, end: rightClip.start + activeTransition.duration };
+  })();
+
+  return (
+    <div className="app">
+      <Toolbar
+        isPlaying={isPlaying}
+        playhead={playhead}
+        duration={duration}
+        canSplit={canSplit}
+        canDelete={selectedClipId !== null}
+        canExport={clips.length > 0}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        selectedClipMuted={selectedClip?.audioMuted ?? false}
+        exportEngine={exportEngine}
+        exportProgress={exportProgress}
+        importProgress={importProgress}
+        onImport={handleImport}
+        onTogglePlay={handleTogglePlay}
+        onSplit={handleSplit}
+        onCutAndAddTransition={handleCutAndAddTransition}
+        onDelete={handleDelete}
+        onUndo={undo}
+        onRedo={redo}
+        onToggleMuteClip={() => selectedClipId && handleToggleClipMute(selectedClipId)}
+        onExtractAudio={() => selectedClipId && handleExtractAudio(selectedClipId)}
+        onExportEngineChange={setExportEngine}
+        onExport={handleExport}
+      />
+      <div className="app-body">
+        <MediaPool sources={sources} importProgress={importProgress} />
+        <div className="main-column">
+          <Preview
+            sources={sources}
+            tracks={tracks}
+            clips={clips}
+            transitions={transitions}
+            playhead={playhead}
+            isPlaying={isPlaying}
+            projectWidth={projectSize.width}
+            projectHeight={projectSize.height}
+            selectedClipId={selectedClipId}
+            onPlayheadChange={setPlayhead}
+            onEnded={() => setIsPlaying(false)}
+            onTransformClip={handleTransformClip}
+            onBeginEdit={beginLiveEdit}
+            onEndEdit={endLiveEdit}
+          />
+          <Timeline
+            sources={sources}
+            tracks={tracks}
+            clips={clips}
+            transitions={transitions}
+            playhead={playhead}
+            selectedClipId={selectedClipId}
+            activeTransitionSlot={activeTransitionSlot}
+            onSeek={handleSeek}
+            onSelectClip={handleSelectClip}
+            onTrimClip={handleTrimClip}
+            onMoveClip={handleMoveClip}
+            onAddClip={handleAddClip}
+            onAddTrack={handleAddTrack}
+            onDeleteTrack={handleDeleteTrack}
+            onToggleTrackMute={handleToggleTrackMute}
+            onSelectTransitionSlot={handleSelectTransitionSlot}
+            onBeginEdit={beginLiveEdit}
+            onEndEdit={endLiveEdit}
+          />
+        </div>
+        <TransitionPanel
+          slot={activeTransitionSlot}
+          transition={activeTransition}
+          windowRange={activeTransitionWindow}
+          onApply={handleApplyTransition}
+          onRemove={() => activeTransition && handleRemoveTransition(activeTransition.id)}
+          onDurationChange={(d) => activeTransition && handleTransitionDuration(activeTransition.id, d)}
+          onWindowChange={(field, v) => activeTransition && handleTransitionWindow(activeTransition.id, field, v)}
+        />
+      </div>
+    </div>
+  );
+}
