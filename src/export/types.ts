@@ -10,6 +10,9 @@ export function webCodecsSupported(): boolean {
 }
 
 export function resolveEngine(engine: ExportEngine): "ffmpeg" | "webcodecs" {
-  if (engine === "auto") return webCodecsSupported() ? "webcodecs" : "ffmpeg";
+  // WebCodecs export has no audio path — Auto defaults to ffmpeg (correct output) rather than
+  // the faster engine that silently drops every clip's sound. WebCodecs stays available as an
+  // explicit choice for when speed matters more than audio.
+  if (engine === "auto") return "ffmpeg";
   return engine;
 }

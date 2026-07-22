@@ -15,9 +15,10 @@ export function TransitionBadge({ hasTransition, editing, onClick }: TransitionB
       }
       onPointerDown={(e) => e.stopPropagation()}
       onClick={onClick}
-      title={hasTransition ? "Edit transition" : "Add transition"}
+      data-tip={hasTransition ? "Edit this transition" : "Add a transition between these clips"}
+      aria-label={hasTransition ? "Edit transition" : "Add transition"}
     >
-      ⧗
+      <i className="ri-contrast-2-line" aria-hidden="true" />
     </button>
   );
 }

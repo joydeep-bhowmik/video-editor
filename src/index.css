@@ -1,15 +1,30 @@
 :root {
-  --bg: #16171d;
-  --panel: #1f2028;
-  --border: #2e303a;
-  --text: #d4d4d8;
-  --text-dim: #8a8b96;
-  --accent: #c084fc;
+  /* Layered near-black surfaces, so panels read as cards floating on the page. */
+  --bg: #0a0a0e;
+  --panel: #13131a;
+  --raised: #1c1c25;
+  --raised-hover: #262631;
+  --border: #24242e;
+
+  --text: #ecedf1;
+  --text-dim: #8b8c9b;
+
+  --accent: #7c5cff;
+  --accent-hover: #8f74ff;
+  --accent-soft: rgba(124, 92, 255, 0.15);
+  --accent-line: rgba(124, 92, 255, 0.45);
+  --danger: #ff5d6c;
+
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
 
   color-scheme: dark;
-  font: 14px/1.4 system-ui, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
   color: var(--text);
   background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -20,7 +35,50 @@ html,
 body,
 #root {
   margin: 0;
-  height: 100vh;
-  width: 100vw;
+  /* dvh tracks the *visible* viewport, so the layout isn't cut off by mobile
+     browser chrome (address bar) the way 100vh is. */
+  height: 100dvh;
+  width: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* 16px prevents iOS zooming on focus; desktop drops back to the smaller scale. */
+input,
+select,
+button,
+textarea {
+  font-family: inherit;
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (min-width: 700px) {
+  input,
+  select,
+  button,
+  textarea {
+    font-size: 14px;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2c2c38;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a48;
+  background-clip: content-box;
 }

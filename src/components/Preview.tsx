@@ -19,6 +19,7 @@ interface PreviewProps {
   onPlayheadChange: (t: number) => void;
   onEnded: () => void;
   onTransformClip: (clipId: string, transform: Transform) => void;
+  onSelectClip: (id: string | null) => void;
   onBeginEdit: () => void;
   onEndEdit: () => void;
 }
@@ -36,6 +37,7 @@ export function Preview({
   onPlayheadChange,
   onEnded,
   onTransformClip,
+  onSelectClip,
   onBeginEdit,
   onEndEdit,
 }: PreviewProps) {
@@ -229,7 +231,7 @@ export function Preview({
       : undefined;
 
   return (
-    <div className="preview">
+    <div className="preview" onPointerDown={() => onSelectClip(null)}>
       <div className="preview-canvas-wrap" style={{ aspectRatio: `${projectWidth} / ${projectHeight}` }}>
         <canvas ref={canvasRef} width={projectWidth} height={projectHeight} />
         {selectedClip && (

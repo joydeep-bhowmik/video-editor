@@ -47,17 +47,28 @@ export async function exportWebCodecs(
     fastStart: "in-memory",
   });
 
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-    error: (e) => console.error("VideoEncoder error", e),
-  });
-  encoder.configure({
-    codec: "avc1.42001f",
+  // Baseline profile for broad player compatibility, but level 5.2 (not the much lower 3.1
+  // some snippets use) — 3.1 caps out around 1280x720 and silently closes the encoder on the
+  // first frame for anything larger, surfacing later as "cannot call encode on a closed codec".
+  const encoderConfig = {
+    codec: "avc1.420034",
     width: projectWidth,
     height: projectHeight,
     bitrate: 6_000_000,
     framerate: EXPORT_FPS,
+  };
+  const support = await VideoEncoder.isConfigSupported(encoderConfig);
+  if (!support.supported) {
+    throw new Error(
+      `This browser can't hardware-encode ${projectWidth}x${projectHeight} video via WebCodecs — try the FFmpeg engine instead.`
+    );
+  }
+
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => console.error("VideoEncoder error", e),
   });
+  encoder.configure(encoderConfig);
 
   const frameStep = 1 / EXPORT_FPS;
   let frameIndex = 0;

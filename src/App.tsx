@@ -14,9 +14,18 @@ import { extractWaveform } from "./lib/waveform";
 import { MediaPool } from "./components/MediaPool";
 import { Preview } from "./components/Preview";
 import { Timeline } from "./components/Timeline";
-import { Toolbar } from "./components/Toolbar";
+import { TopBar } from "./components/TopBar";
+import { ActionBar } from "./components/ActionBar";
+import { ExportOverlay } from "./components/ExportOverlay";
 import { TransitionPanel, type TransitionSlot } from "./components/TransitionPanel";
-import { clampClipStart, isClipActiveAt, maxClipDurationAt, splitClipAt, totalDuration } from "./lib/timeline";
+import {
+  clipDuration,
+  isClipActiveAt,
+  maxClipDurationAt,
+  planInsert,
+  splitClipAt,
+  totalDuration,
+} from "./lib/timeline";
 import { applyTransition, DEFAULT_TRANSITION_DURATION, retimeTransition } from "./lib/transitions";
 import type { Clip, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
 
@@ -47,6 +56,8 @@ export default function App() {
   const canRedo = history.future.length > 0;
 
   const [activeTransitionSlot, setActiveTransitionSlot] = useState<TransitionSlot | null>(null);
+  const [draggingSourceId, setDraggingSourceId] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"media" | "transitions" | null>(null);
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -118,36 +129,87 @@ export default function App() {
     setImportProgress(null);
   }
 
-  function handleAddClip(sourceId: string, trackId: string, start: number) {
+  function handleAddClip(sourceId: string, trackId: string, dropTime: number) {
     const source = sources.find((s) => s.id === sourceId);
     if (!source) return;
     const trackIndex = tracks.findIndex((t) => t.id === trackId);
     const isBaseTrack = trackIndex <= 0;
     const clipId = crypto.randomUUID();
-    const clampedStart = clampClipStart(clips, trackId, clipId, Math.max(0, start), source.duration);
+    const plan = planInsert(clips, trackId, dropTime, source.duration);
 
     const newClip: Clip = {
       id: clipId,
       trackId,
       sourceId,
-      start: clampedStart,
+      start: plan.start,
       inPoint: 0,
       outPoint: source.duration,
       transform: { ...(isBaseTrack ? DEFAULT_TRANSFORM_BASE : DEFAULT_TRANSFORM_OVERLAY) },
       audioMuted: false,
     };
 
-    commitEdit((prev) => ({ ...prev, clips: [...prev.clips, newClip] }));
+    commitEdit((prev) => {
+      const shiftOf = (c: Clip) =>
+        c.trackId === trackId && plan.rippleBy > 0 && c.start >= plan.rippleFrom ? plan.rippleBy : 0;
+      const nextClips = prev.clips.map((c) => (shiftOf(c) ? { ...c, start: c.start + shiftOf(c) } : c));
+
+      // A transition only makes sense while its two clips stay adjacent. If the insert pushed
+      // one of them but not the other, the pair has been split apart — drop that transition
+      // rather than leave it pointing at a gap.
+      const nextTransitions = prev.transitions.filter((t) => {
+        const left = prev.clips.find((c) => c.id === t.leftClipId);
+        const right = prev.clips.find((c) => c.id === t.rightClipId);
+        if (!left || !right) return true;
+        return shiftOf(left) === shiftOf(right);
+      });
+
+      return { ...prev, clips: [...nextClips, newClip], transitions: nextTransitions };
+    });
+
     setSelectedClipId(clipId);
     setIsPlaying(false);
-    setPlayhead(clampedStart);
+    setPlayhead(plan.start);
   }
 
-  function handleMoveClip(id: string, trackId: string, start: number) {
-    updateLive((prev) => ({
-      ...prev,
-      clips: prev.clips.map((c) => (c.id === id ? { ...c, trackId, start } : c)),
-    }));
+  /**
+   * Commit a clip drag. Uses the same insert semantics as dropping new media, so dragging a clip
+   * onto an occupied spot reorders (pushing neighbours aside) instead of refusing to move.
+   * Called once on pointer-release, so a whole drag is a single undo step.
+   */
+  function handleReorderClip(id: string, trackId: string, dropTime: number) {
+    const clip = clips.find((c) => c.id === id);
+    if (!clip) return;
+    const others = clips.filter((c) => c.id !== id);
+    const plan = planInsert(others, trackId, dropTime, clipDuration(clip));
+
+    const unchanged =
+      trackId === clip.trackId && Math.abs(plan.start - clip.start) < 1e-6 && plan.rippleBy === 0;
+    if (unchanged) return;
+
+    commitEdit((prev) => {
+      const shiftOf = (c: Clip) =>
+        c.id !== id && c.trackId === trackId && plan.rippleBy > 0 && c.start >= plan.rippleFrom
+          ? plan.rippleBy
+          : 0;
+
+      const nextClips = prev.clips.map((c) => {
+        if (c.id === id) return { ...c, trackId, start: plan.start };
+        const shift = shiftOf(c);
+        return shift ? { ...c, start: c.start + shift } : c;
+      });
+
+      // Moving a clip breaks any transition it was part of (it's no longer adjacent to its
+      // partner), and a ripple that shifts only one side of a pair breaks that pair too.
+      const nextTransitions = prev.transitions.filter((t) => {
+        if (t.leftClipId === id || t.rightClipId === id) return false;
+        const left = prev.clips.find((c) => c.id === t.leftClipId);
+        const right = prev.clips.find((c) => c.id === t.rightClipId);
+        if (!left || !right) return true;
+        return shiftOf(left) === shiftOf(right);
+      });
+
+      return { ...prev, clips: nextClips, transitions: nextTransitions };
+    });
   }
 
   function handleTransformClip(id: string, transform: Transform) {
@@ -416,6 +478,7 @@ export default function App() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (exportProgress) return; // editing is locked while the export overlay is up
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       const mod = e.ctrlKey || e.metaKey;
@@ -449,7 +512,7 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleSplit, handleCutAndAddTransition, handleDelete, undo, redo, playhead, duration]);
+  }, [handleSplit, handleCutAndAddTransition, handleDelete, undo, redo, playhead, duration, exportProgress]);
 
   const selectedClip = clips.find((c) => c.id === selectedClipId);
   const canSplit = !!selectedClip && isClipActiveAt(selectedClip, playhead);
@@ -467,33 +530,30 @@ export default function App() {
 
   return (
     <div className="app">
-      <Toolbar
-        isPlaying={isPlaying}
-        playhead={playhead}
-        duration={duration}
-        canSplit={canSplit}
-        canDelete={selectedClipId !== null}
+      <TopBar
         canExport={clips.length > 0}
         canUndo={canUndo}
         canRedo={canRedo}
-        selectedClipMuted={selectedClip?.audioMuted ?? false}
         exportEngine={exportEngine}
         exportProgress={exportProgress}
         importProgress={importProgress}
+        mobilePanel={mobilePanel}
         onImport={handleImport}
-        onTogglePlay={handleTogglePlay}
-        onSplit={handleSplit}
-        onCutAndAddTransition={handleCutAndAddTransition}
-        onDelete={handleDelete}
         onUndo={undo}
         onRedo={redo}
-        onToggleMuteClip={() => selectedClipId && handleToggleClipMute(selectedClipId)}
-        onExtractAudio={() => selectedClipId && handleExtractAudio(selectedClipId)}
         onExportEngineChange={setExportEngine}
         onExport={handleExport}
+        onTogglePanel={(p) => setMobilePanel((cur) => (cur === p ? null : p))}
       />
       <div className="app-body">
-        <MediaPool sources={sources} importProgress={importProgress} />
+        {mobilePanel && <div className="panel-backdrop" onClick={() => setMobilePanel(null)} />}
+        <MediaPool
+          sources={sources}
+          importProgress={importProgress}
+          open={mobilePanel === "media"}
+          onClose={() => setMobilePanel(null)}
+          onDragSourceChange={setDraggingSourceId}
+        />
         <div className="main-column">
           <Preview
             sources={sources}
@@ -508,8 +568,23 @@ export default function App() {
             onPlayheadChange={setPlayhead}
             onEnded={() => setIsPlaying(false)}
             onTransformClip={handleTransformClip}
+            onSelectClip={handleSelectClip}
             onBeginEdit={beginLiveEdit}
             onEndEdit={endLiveEdit}
+          />
+          <ActionBar
+            isPlaying={isPlaying}
+            playhead={playhead}
+            duration={duration}
+            canSplit={canSplit}
+            canDelete={selectedClipId !== null}
+            selectedClipMuted={selectedClip?.audioMuted ?? false}
+            onTogglePlay={handleTogglePlay}
+            onSplit={handleSplit}
+            onCutAndAddTransition={handleCutAndAddTransition}
+            onDelete={handleDelete}
+            onToggleMuteClip={() => selectedClipId && handleToggleClipMute(selectedClipId)}
+            onExtractAudio={() => selectedClipId && handleExtractAudio(selectedClipId)}
           />
           <Timeline
             sources={sources}
@@ -519,10 +594,11 @@ export default function App() {
             playhead={playhead}
             selectedClipId={selectedClipId}
             activeTransitionSlot={activeTransitionSlot}
+            draggingSourceId={draggingSourceId}
             onSeek={handleSeek}
             onSelectClip={handleSelectClip}
             onTrimClip={handleTrimClip}
-            onMoveClip={handleMoveClip}
+            onReorderClip={handleReorderClip}
             onAddClip={handleAddClip}
             onAddTrack={handleAddTrack}
             onDeleteTrack={handleDeleteTrack}
@@ -536,12 +612,16 @@ export default function App() {
           slot={activeTransitionSlot}
           transition={activeTransition}
           windowRange={activeTransitionWindow}
+          open={mobilePanel === "transitions"}
+          onClose={() => setMobilePanel(null)}
           onApply={handleApplyTransition}
           onRemove={() => activeTransition && handleRemoveTransition(activeTransition.id)}
           onDurationChange={(d) => activeTransition && handleTransitionDuration(activeTransition.id, d)}
           onWindowChange={(field, v) => activeTransition && handleTransitionWindow(activeTransition.id, field, v)}
         />
       </div>
+
+      {exportProgress && <ExportOverlay progress={exportProgress} />}
     </div>
   );
 }

@@ -4,6 +4,10 @@ import type { SourceVideo } from "../types";
 interface MediaPoolProps {
   sources: SourceVideo[];
   importProgress: { name: string; ratio: number } | null;
+  /** Drawer state — only meaningful on small screens; on desktop the panel is always shown. */
+  open: boolean;
+  onClose: () => void;
+  onDragSourceChange: (sourceId: string | null) => void;
 }
 
 function formatDuration(t: number) {
@@ -14,12 +18,20 @@ function formatDuration(t: number) {
   return `${m}:${s}`;
 }
 
-export function MediaPool({ sources, importProgress }: MediaPoolProps) {
+export function MediaPool({ sources, importProgress, open, onClose, onDragSourceChange }: MediaPoolProps) {
   return (
-    <div className="media-pool">
-      <div className="media-pool-header">Media Pool</div>
+    <div className={"media-pool side-panel" + (open ? " is-open" : "")}>
+      <div className="side-panel-header">
+        <i className="ri-folder-video-line" aria-hidden="true" />
+        <span>Your Media</span>
+        <button type="button" className="side-panel-close" onClick={onClose} aria-label="Close">
+          <i className="ri-close-line" aria-hidden="true" />
+        </button>
+      </div>
       {sources.length === 0 && !importProgress && (
-        <div className="media-pool-empty">Import a video to add it here</div>
+        <div className="media-pool-empty">
+          Tap <strong>Add</strong> in the toolbar to bring in a video or song.
+        </div>
       )}
       <div className="media-pool-list">
         {importProgress && (
@@ -41,7 +53,11 @@ export function MediaPool({ sources, importProgress }: MediaPoolProps) {
             onDragStart={(e) => {
               e.dataTransfer.setData("text/plain", source.id);
               e.dataTransfer.effectAllowed = "copy";
+              // dataTransfer contents aren't readable during dragover (only on drop), so the
+              // timeline gets the dragged source through app state to preview the drop.
+              onDragSourceChange(source.id);
             }}
+            onDragEnd={() => onDragSourceChange(null)}
           >
             <div className="media-pool-item-row">
               {source.thumbnail ? (
@@ -60,7 +76,9 @@ export function MediaPool({ sources, importProgress }: MediaPoolProps) {
           </div>
         ))}
       </div>
-      <div className="media-pool-hint">Drag a clip onto a track</div>
+      <div className="media-pool-hint">
+        <i className="ri-drag-move-2-line" aria-hidden="true" /> Drag any item down onto a track
+      </div>
     </div>
   );
 }

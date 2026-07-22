@@ -247,7 +247,11 @@ export async function exportFfmpeg(
   }
   if (overlays.length === 0) filterLines.push("[base]null[vout]");
 
-  if (audioLabels.length > 0) {
+  if (audioLabels.length === 1) {
+    // amix is meant for combining 2+ streams; skip it for the (very common) single-clip case
+    // rather than rely on inputs=1 being a clean passthrough.
+    filterLines.push(`[${audioLabels[0]}]anull[aout]`);
+  } else if (audioLabels.length > 1) {
     filterLines.push(
       `${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:normalize=0[aout]`
     );
