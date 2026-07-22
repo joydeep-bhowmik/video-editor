@@ -9,13 +9,13 @@ interface TopBarProps {
   exportEngine: ExportEngine;
   exportProgress: ExportProgress | null;
   importProgress: { name: string; ratio: number } | null;
-  mobilePanel: "media" | "transitions" | null;
+  mobilePanel: "media" | "inspector" | null;
   onImport: (files: FileList) => void;
   onUndo: () => void;
   onRedo: () => void;
   onExportEngineChange: (engine: ExportEngine) => void;
   onExport: () => void;
-  onTogglePanel: (panel: "media" | "transitions") => void;
+  onTogglePanel: (panel: "media" | "inspector") => void;
 }
 
 export function TopBar({
@@ -92,11 +92,11 @@ export function TopBar({
           onClick={() => onTogglePanel("media")}
         />
         <IconButton
-          icon="ri-magic-line"
+          icon="ri-sparkling-line"
           label="Effects"
-          hint="Transitions between clips"
-          active={mobilePanel === "transitions"}
-          onClick={() => onTogglePanel("transitions")}
+          hint="Effects and transitions for the selected clip"
+          active={mobilePanel === "inspector"}
+          onClick={() => onTogglePanel("inspector")}
         />
       </div>
 

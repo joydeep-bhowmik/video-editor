@@ -3,7 +3,7 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { EXPORT_FPS } from "../lib/constants";
 import { computeContainSize } from "../lib/compositor";
 import { clipDuration, totalDuration } from "../lib/timeline";
-import type { Clip, SourceVideo, Track, Transition, TransitionKind } from "../types";
+import type { Clip, Effect, SourceVideo, Track, Transition, TransitionKind } from "../types";
 import type { ExportProgress } from "./types";
 
 let ffmpegSingleton: FFmpeg | null = null;
@@ -50,6 +50,60 @@ const XFADE_KIND: Record<TransitionKind, string> = {
   "iris-circle": "circleopen", // approximation, see note above
   "iris-square": "rectcrop", // approximation, see note above
 };
+
+/**
+ * Map a clip's effect stack onto native ffmpeg filters.
+ *
+ * Most have direct equivalents. Two do not and are skipped rather than faked:
+ *  - Glow needs a split/blur/screen sub-graph, which can't be expressed inline in this
+ *    single-chain position without restructuring the whole graph.
+ *  - Shadow is a compositing operation that paints *outside* the frame, so there's nothing
+ *    for a per-clip pixel filter to do — the canvas renderer draws it during overlay instead.
+ * Both still render correctly in the preview and the WebCodecs export.
+ */
+function effectFilters(effects: Effect[]): string[] {
+  const out: string[] = [];
+  for (const e of effects) {
+    const i = e.intensity;
+    switch (e.kind) {
+      case "blur":
+        out.push(`gblur=sigma=${(i * 14).toFixed(2)}`);
+        break;
+      case "black-white":
+        out.push(`hue=s=${(1 - Math.min(1, i)).toFixed(3)}`);
+        break;
+      case "green-screen":
+        out.push(`chromakey=0x00FF00:${(0.1 + i * 0.4).toFixed(3)}:0.1`);
+        break;
+      case "vignette":
+        out.push(`vignette=angle=${(Math.PI / 5 + i * (Math.PI / 5)).toFixed(4)}`);
+        break;
+      case "pixelate": {
+        // Native block-averaging filter — a scale-down/scale-up round trip can't be expressed
+        // safely inline here, since `iw` would already refer to the reduced width.
+        const block = Math.max(2, Math.round(2 + i * 30));
+        out.push(`pixelize=w=${block}:h=${block}`);
+        break;
+      }
+      case "sharpen":
+        out.push(`unsharp=5:5:${(i * 2).toFixed(2)}:5:5:0`);
+        break;
+      case "film-grain":
+        out.push(`noise=alls=${Math.round(i * 40)}:allf=t`);
+        break;
+      case "rgb-split": {
+        const px = Math.max(1, Math.round(i * 12));
+        out.push(`rgbashift=rh=${-px}:bh=${px}`);
+        break;
+      }
+      case "glow":
+      case "shadow":
+        // No inline equivalent — see the note above.
+        break;
+    }
+  }
+  return out;
+}
 
 interface OverlayLayer {
   label: string;
@@ -138,8 +192,12 @@ export async function exportFfmpeg(
     const rotRad = (transform.rotation * Math.PI) / 180;
     const label = nextLabel("v");
     const shiftPrefix = timeShift !== undefined ? `setpts=PTS+${timeShift}/TB,` : "";
+    // Effects run before scale/rotate so they operate on the clip's own pixels, matching the
+    // preview (where the effect pass happens on the raw frame, then the transform is applied).
+    const fx = effectFilters(clip.effects);
+    const fxPrefix = fx.length ? `${fx.join(",")},` : "";
     filterLines.push(
-      `[${partIndex}:v]${shiftPrefix}scale=${Math.max(2, Math.round(drawW))}:${Math.max(2, Math.round(drawH))},format=rgba,` +
+      `[${partIndex}:v]${shiftPrefix}${fxPrefix}scale=${Math.max(2, Math.round(drawW))}:${Math.max(2, Math.round(drawH))},format=rgba,` +
         `rotate=${rotRad}:c=none:ow=rotw(${rotRad}):oh=roth(${rotRad}),colorchannelmixer=aa=${transform.opacity}[${label}]`
     );
     return {

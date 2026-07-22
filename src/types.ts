@@ -31,6 +31,25 @@ export interface Track {
   muted: boolean;
 }
 
+export type EffectKind =
+  | "blur"
+  | "green-screen"
+  | "glow"
+  | "shadow"
+  | "black-white"
+  | "vignette"
+  | "pixelate"
+  | "sharpen"
+  | "film-grain"
+  | "rgb-split";
+
+export interface Effect {
+  id: string;
+  kind: EffectKind;
+  /** 0..1, meaning is per-effect (blur radius, key tolerance, grain amount, …). */
+  intensity: number;
+}
+
 export interface Clip {
   id: string;
   trackId: string;
@@ -40,6 +59,7 @@ export interface Clip {
   outPoint: number;
   transform: Transform;
   audioMuted: boolean;
+  effects: Effect[];
 }
 
 export type TransitionKind =

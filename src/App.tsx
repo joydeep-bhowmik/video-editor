@@ -9,6 +9,7 @@ import {
   MIN_CLIP_DURATION,
 } from "./lib/constants";
 import { historyReducer, initialHistory } from "./lib/history";
+import { makeEffect } from "./lib/effects";
 import { loadVideoMeta } from "./lib/videoMeta";
 import { extractWaveform } from "./lib/waveform";
 import { MediaPool } from "./components/MediaPool";
@@ -18,6 +19,8 @@ import { TopBar } from "./components/TopBar";
 import { ActionBar } from "./components/ActionBar";
 import { ExportOverlay } from "./components/ExportOverlay";
 import { TransitionPanel, type TransitionSlot } from "./components/TransitionPanel";
+import { EffectsPanel } from "./components/EffectsPanel";
+import { InspectorPanel, type InspectorTab } from "./components/InspectorPanel";
 import {
   clipDuration,
   isClipActiveAt,
@@ -27,7 +30,7 @@ import {
   totalDuration,
 } from "./lib/timeline";
 import { applyTransition, DEFAULT_TRANSITION_DURATION, retimeTransition } from "./lib/transitions";
-import type { Clip, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
+import type { Clip, EffectKind, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
 
 const FRAME_STEP = 1 / 30;
 
@@ -57,7 +60,8 @@ export default function App() {
 
   const [activeTransitionSlot, setActiveTransitionSlot] = useState<TransitionSlot | null>(null);
   const [draggingSourceId, setDraggingSourceId] = useState<string | null>(null);
-  const [mobilePanel, setMobilePanel] = useState<"media" | "transitions" | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"media" | "inspector" | null>(null);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("effects");
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -146,6 +150,7 @@ export default function App() {
       outPoint: source.duration,
       transform: { ...(isBaseTrack ? DEFAULT_TRANSFORM_BASE : DEFAULT_TRANSFORM_OVERLAY) },
       audioMuted: false,
+      effects: [],
     };
 
     commitEdit((prev) => {
@@ -275,11 +280,47 @@ export default function App() {
       trackId: newTrack.id,
       transform: { ...DEFAULT_TRANSFORM_BASE },
       audioMuted: false,
+      // The detached copy is audio-only, so visual effects don't carry over.
+      effects: [],
     };
     commitEdit((prev) => ({
       tracks: [...prev.tracks, newTrack],
       clips: [...prev.clips.map((c) => (c.id === clipId ? { ...c, audioMuted: true } : c)), newClip],
       transitions: prev.transitions,
+    }));
+  }
+
+  function handleAddEffect(clipId: string, kind: EffectKind) {
+    commitEdit((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) =>
+        // One instance per kind — stacking two blurs just means "more blur", which the
+        // intensity slider already covers.
+        c.id === clipId && !c.effects.some((e) => e.kind === kind)
+          ? { ...c, effects: [...c.effects, makeEffect(kind)] }
+          : c
+      ),
+    }));
+  }
+
+  function handleRemoveEffect(clipId: string, effectId: string) {
+    commitEdit((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) =>
+        c.id === clipId ? { ...c, effects: c.effects.filter((e) => e.id !== effectId) } : c
+      ),
+    }));
+  }
+
+  function handleEffectIntensity(clipId: string, effectId: string, intensity: number) {
+    // Dragging the slider is a continuous gesture, so it coalesces into one undo step.
+    updateLive((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) =>
+        c.id === clipId
+          ? { ...c, effects: c.effects.map((e) => (e.id === effectId ? { ...e, intensity } : e)) }
+          : c
+      ),
     }));
   }
 
@@ -608,16 +649,32 @@ export default function App() {
             onEndEdit={endLiveEdit}
           />
         </div>
-        <TransitionPanel
-          slot={activeTransitionSlot}
-          transition={activeTransition}
-          windowRange={activeTransitionWindow}
-          open={mobilePanel === "transitions"}
+        <InspectorPanel
+          open={mobilePanel === "inspector"}
+          tab={inspectorTab}
+          onTabChange={setInspectorTab}
           onClose={() => setMobilePanel(null)}
-          onApply={handleApplyTransition}
-          onRemove={() => activeTransition && handleRemoveTransition(activeTransition.id)}
-          onDurationChange={(d) => activeTransition && handleTransitionDuration(activeTransition.id, d)}
-          onWindowChange={(field, v) => activeTransition && handleTransitionWindow(activeTransition.id, field, v)}
+          effects={
+            <EffectsPanel
+              clip={selectedClip}
+              onAdd={(kind) => selectedClipId && handleAddEffect(selectedClipId, kind)}
+              onRemove={(effectId) => selectedClipId && handleRemoveEffect(selectedClipId, effectId)}
+              onIntensity={(effectId, v) => selectedClipId && handleEffectIntensity(selectedClipId, effectId, v)}
+              onBeginEdit={beginLiveEdit}
+              onEndEdit={endLiveEdit}
+            />
+          }
+          transitions={
+            <TransitionPanel
+              slot={activeTransitionSlot}
+              transition={activeTransition}
+              windowRange={activeTransitionWindow}
+              onApply={handleApplyTransition}
+              onRemove={() => activeTransition && handleRemoveTransition(activeTransition.id)}
+              onDurationChange={(d) => activeTransition && handleTransitionDuration(activeTransition.id, d)}
+              onWindowChange={(field, v) => activeTransition && handleTransitionWindow(activeTransition.id, field, v)}
+            />
+          }
         />
       </div>
 

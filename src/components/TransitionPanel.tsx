@@ -17,9 +17,6 @@ interface TransitionPanelProps {
   slot: TransitionSlot | null;
   transition: Transition | undefined;
   windowRange: TransitionWindow | undefined;
-  /** Drawer state — only meaningful on small screens; on desktop the panel is always shown. */
-  open: boolean;
-  onClose: () => void;
   onApply: (kind: TransitionKind) => void;
   onRemove: () => void;
   onDurationChange: (duration: number) => void;
@@ -34,8 +31,6 @@ export function TransitionPanel({
   slot,
   transition,
   windowRange,
-  open,
-  onClose,
   onApply,
   onRemove,
   onDurationChange,
@@ -80,17 +75,9 @@ export function TransitionPanel({
   }
 
   return (
-    <div className={"transition-panel side-panel" + (open ? " is-open" : "")}>
-      <div className="side-panel-header">
-        <i className="ri-magic-line" aria-hidden="true" />
-        <span>Transitions</span>
-        <button type="button" className="side-panel-close" onClick={onClose} aria-label="Close">
-          <i className="ri-close-line" aria-hidden="true" />
-        </button>
-      </div>
-
+    <div className="transition-panel">
       {!slot && (
-        <div className="transition-panel-empty">
+        <div className="panel-empty">
           Put two clips side by side on a track, then tap the{" "}
           <i className="ri-contrast-2-line" aria-hidden="true" /> badge where they meet to blend
           them.

@@ -121,9 +121,9 @@ export function transitionMidpoint(clips: Clip[], transition: Transition): numbe
 
 interface RenderArgs {
   ctx: CanvasRenderingContext2D;
-  videoA: HTMLVideoElement;
+  imageA: CanvasImageSource;
   transformA: Transform;
-  videoB: HTMLVideoElement;
+  imageB: CanvasImageSource;
   transformB: Transform;
   progress: number;
   canvasW: number;
@@ -134,21 +134,21 @@ function withOpacity(t: Transform, factor: number): Transform {
   return { ...t, opacity: t.opacity * factor };
 }
 
-function drawFade({ ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH }: RenderArgs) {
-  drawClip(ctx, videoA, transformA, canvasW, canvasH);
-  drawClip(ctx, videoB, withOpacity(transformB, progress), canvasW, canvasH);
+function drawFade({ ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH }: RenderArgs) {
+  drawClip(ctx, imageA, transformA, canvasW, canvasH);
+  drawClip(ctx, imageB, withOpacity(transformB, progress), canvasW, canvasH);
 }
 
 function drawFadeThroughSolid(args: RenderArgs, color: string) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
   if (progress < 0.5) {
     const t = progress / 0.5;
-    drawClip(ctx, videoA, withOpacity(transformA, 1 - t), canvasW, canvasH);
+    drawClip(ctx, imageA, withOpacity(transformA, 1 - t), canvasW, canvasH);
   } else {
     const t = (progress - 0.5) / 0.5;
     ctx.fillStyle = color;
     ctx.fillRect(0, 0, canvasW, canvasH);
-    drawClip(ctx, videoB, withOpacity(transformB, t), canvasW, canvasH);
+    drawClip(ctx, imageB, withOpacity(transformB, t), canvasW, canvasH);
   }
 }
 
@@ -172,27 +172,27 @@ function withOffset(t: Transform, canvasW: number, canvasH: number, dx: number, 
 }
 
 function drawSlide(args: RenderArgs, dir: Direction) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
   // B slides in over a static A.
-  drawClip(ctx, videoA, transformA, canvasW, canvasH);
+  drawClip(ctx, imageA, transformA, canvasW, canvasH);
   const enter = directionOffset(dir, canvasW, canvasH, 1 - progress);
   // Slides *in*, so it enters from the opposite side of its exit direction.
   const from = { x: -enter.x, y: -enter.y };
-  drawClip(ctx, videoB, withOffset(transformB, canvasW, canvasH, from.x, from.y), canvasW, canvasH);
+  drawClip(ctx, imageB, withOffset(transformB, canvasW, canvasH, from.x, from.y), canvasW, canvasH);
 }
 
 function drawPush(args: RenderArgs, dir: Direction) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
   // Both clips translate together, like a physical panel push.
   const exit = directionOffset(dir, canvasW, canvasH, progress);
   const enterFrom = directionOffset(dir, canvasW, canvasH, 1 - progress);
-  drawClip(ctx, videoA, withOffset(transformA, canvasW, canvasH, exit.x, exit.y), canvasW, canvasH);
-  drawClip(ctx, videoB, withOffset(transformB, canvasW, canvasH, -enterFrom.x, -enterFrom.y), canvasW, canvasH);
+  drawClip(ctx, imageA, withOffset(transformA, canvasW, canvasH, exit.x, exit.y), canvasW, canvasH);
+  drawClip(ctx, imageB, withOffset(transformB, canvasW, canvasH, -enterFrom.x, -enterFrom.y), canvasW, canvasH);
 }
 
 function drawWipeRect(args: RenderArgs, dir: "left" | "right") {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
-  drawClip(ctx, videoA, transformA, canvasW, canvasH);
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
+  drawClip(ctx, imageA, transformA, canvasW, canvasH);
   ctx.save();
   ctx.beginPath();
   if (dir === "left") {
@@ -201,13 +201,13 @@ function drawWipeRect(args: RenderArgs, dir: "left" | "right") {
     ctx.rect(canvasW * (1 - progress), 0, canvasW * progress, canvasH);
   }
   ctx.clip();
-  drawClip(ctx, videoB, transformB, canvasW, canvasH);
+  drawClip(ctx, imageB, transformB, canvasW, canvasH);
   ctx.restore();
 }
 
 function drawWipeClock(args: RenderArgs) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
-  drawClip(ctx, videoA, transformA, canvasW, canvasH);
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
+  drawClip(ctx, imageA, transformA, canvasW, canvasH);
   const cx = canvasW / 2;
   const cy = canvasH / 2;
   const radius = Math.hypot(canvasW, canvasH);
@@ -217,13 +217,13 @@ function drawWipeClock(args: RenderArgs) {
   ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
   ctx.closePath();
   ctx.clip();
-  drawClip(ctx, videoB, transformB, canvasW, canvasH);
+  drawClip(ctx, imageB, transformB, canvasW, canvasH);
   ctx.restore();
 }
 
 function drawWipeCircle(args: RenderArgs) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
-  drawClip(ctx, videoA, transformA, canvasW, canvasH);
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
+  drawClip(ctx, imageA, transformA, canvasW, canvasH);
   const cx = canvasW / 2;
   const cy = canvasH / 2;
   const maxRadius = Math.hypot(canvasW, canvasH) / 2;
@@ -231,17 +231,17 @@ function drawWipeCircle(args: RenderArgs) {
   ctx.beginPath();
   ctx.arc(cx, cy, maxRadius * progress, 0, Math.PI * 2);
   ctx.clip();
-  drawClip(ctx, videoB, transformB, canvasW, canvasH);
+  drawClip(ctx, imageB, transformB, canvasW, canvasH);
   ctx.restore();
 }
 
 function drawZoomIn(args: RenderArgs) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
-  drawClip(ctx, videoA, transformA, canvasW, canvasH);
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
+  drawClip(ctx, imageA, transformA, canvasW, canvasH);
   const scale = 0.05 + 0.95 * progress;
   drawClip(
     ctx,
-    videoB,
+    imageB,
     { ...transformB, scale: transformB.scale * scale, opacity: transformB.opacity * progress },
     canvasW,
     canvasH
@@ -249,12 +249,12 @@ function drawZoomIn(args: RenderArgs) {
 }
 
 function drawZoomOut(args: RenderArgs) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
-  drawClip(ctx, videoB, transformB, canvasW, canvasH);
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
+  drawClip(ctx, imageB, transformB, canvasW, canvasH);
   const scale = 1 + 0.8 * progress;
   drawClip(
     ctx,
-    videoA,
+    imageA,
     { ...transformA, scale: transformA.scale * scale, opacity: transformA.opacity * (1 - progress) },
     canvasW,
     canvasH
@@ -264,17 +264,17 @@ function drawZoomOut(args: RenderArgs) {
 const BLUR_PEAK_PX = 18;
 
 function drawBlur(args: RenderArgs) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
   const blurPx = Math.sin(progress * Math.PI) * BLUR_PEAK_PX;
   ctx.save();
   ctx.filter = `blur(${blurPx.toFixed(1)}px)`;
-  drawClip(ctx, videoA, withOpacity(transformA, 1 - progress), canvasW, canvasH);
-  drawClip(ctx, videoB, withOpacity(transformB, progress), canvasW, canvasH);
+  drawClip(ctx, imageA, withOpacity(transformA, 1 - progress), canvasW, canvasH);
+  drawClip(ctx, imageB, withOpacity(transformB, progress), canvasW, canvasH);
   ctx.restore();
 }
 
 function drawMotionBlur(args: RenderArgs) {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
   const blurPx = Math.sin(progress * Math.PI) * BLUR_PEAK_PX;
   const ghostSteps = 3;
   const spread = 0.04 * canvasW;
@@ -286,7 +286,7 @@ function drawMotionBlur(args: RenderArgs) {
     const dx = -spread * k * progress;
     drawClip(
       ctx,
-      videoA,
+      imageA,
       withOffset(withOpacity(transformA, (1 - progress) * (1 - k * 0.6)), canvasW, canvasH, dx, 0),
       canvasW,
       canvasH
@@ -297,7 +297,7 @@ function drawMotionBlur(args: RenderArgs) {
     const dx = spread * k * (1 - progress);
     drawClip(
       ctx,
-      videoB,
+      imageB,
       withOffset(withOpacity(transformB, progress * (1 - k * 0.6)), canvasW, canvasH, dx, 0),
       canvasW,
       canvasH
@@ -307,7 +307,7 @@ function drawMotionBlur(args: RenderArgs) {
 }
 
 function drawIris(args: RenderArgs, shape: "circle" | "square") {
-  const { ctx, videoA, transformA, videoB, transformB, progress, canvasW, canvasH } = args;
+  const { ctx, imageA, transformA, imageB, transformB, progress, canvasW, canvasH } = args;
   const cx = canvasW / 2;
   const cy = canvasH / 2;
   const maxRadius = Math.hypot(canvasW, canvasH) / 2;
@@ -327,7 +327,7 @@ function drawIris(args: RenderArgs, shape: "circle" | "square") {
     ctx.rect(cx - radius, cy - radius, radius * 2, radius * 2);
   }
   ctx.clip();
-  drawClip(ctx, closing ? videoA : videoB, closing ? transformA : transformB, canvasW, canvasH);
+  drawClip(ctx, closing ? imageA : imageB, closing ? transformA : transformB, canvasW, canvasH);
   ctx.restore();
 }
 

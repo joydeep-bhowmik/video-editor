@@ -3,6 +3,7 @@ import { drawFrame } from "../lib/compositor";
 import { findActiveClip, isClipActiveAt, totalDuration } from "../lib/timeline";
 import { findTransitionAt } from "../lib/transitions";
 import { getClipVideo, peekClipVideo, pruneClipVideos } from "../lib/videoPool";
+import { pruneEffectCanvases } from "../lib/effects";
 import { TransformGizmo } from "./TransformGizmo";
 import type { Clip, SourceVideo, Track, Transform, Transition } from "../types";
 
@@ -72,9 +73,11 @@ export function Preview({
     );
   }
 
-  // release decoders for clips that were deleted
+  // release decoders and cached effect canvases for clips that were deleted
   useEffect(() => {
-    pruneClipVideos(new Set(clips.map((c) => c.id)));
+    const live = new Set(clips.map((c) => c.id));
+    pruneClipVideos(live);
+    pruneEffectCanvases(live);
   }, [clips]);
 
   // paused / scrubbing: seek each active clip's video to the right frame, redraw
