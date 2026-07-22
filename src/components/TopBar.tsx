@@ -70,6 +70,7 @@ export function TopBar({
         label="Undo"
         hint="Take back your last change"
         shortcut="Ctrl+Z"
+        iconOnly
         disabled={!canUndo}
         onClick={onUndo}
       />
@@ -78,6 +79,7 @@ export function TopBar({
         label="Redo"
         hint="Re-apply what you undid"
         shortcut="Ctrl+Shift+Z"
+        iconOnly
         disabled={!canRedo}
         onClick={onRedo}
       />

@@ -12,6 +12,8 @@ interface IconButtonProps {
   disabled?: boolean;
   /** Keep the text label visible even on narrow screens (for primary actions). */
   alwaysShowLabel?: boolean;
+  /** Never render the visible label — the name still reaches users via tooltip and aria-label. */
+  iconOnly?: boolean;
   onClick?: () => void;
   children?: ReactNode;
 }
@@ -24,6 +26,7 @@ export function IconButton({
   active,
   disabled,
   alwaysShowLabel,
+  iconOnly,
   onClick,
   children,
 }: IconButtonProps) {
@@ -38,7 +41,9 @@ export function IconButton({
       aria-label={label}
     >
       <i className={icon} aria-hidden="true" />
-      <span className={"icon-button-label" + (alwaysShowLabel ? " is-always" : "")}>{label}</span>
+      {!iconOnly && (
+        <span className={"icon-button-label" + (alwaysShowLabel ? " is-always" : "")}>{label}</span>
+      )}
       {children}
     </button>
   );
