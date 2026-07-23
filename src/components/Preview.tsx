@@ -161,11 +161,12 @@ export function Preview({
           time = baseClip.start + (baseVideo.currentTime - baseClip.inPoint);
         }
         fallbackAnchorWall = null;
-      } else if (baseClip) {
+      } else if (baseClip && baseVideo) {
         // Base clip just became active and hasn't started producing frames yet — hold steady.
         time = localTimeRef.current;
       } else {
-        // No base-track clip covers this moment (empty base track / gap) — fall back to wall clock.
+        // No base-track clip covers this moment (empty base track / gap), or the base clip is a
+        // still image with nothing to drive playback — fall back to wall clock.
         if (fallbackAnchorWall === null) {
           fallbackAnchorWall = now;
           fallbackAnchorTime = localTimeRef.current;
