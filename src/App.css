@@ -489,6 +489,85 @@
   gap: 16px;
 }
 
+/* ---------- Keyframes ------------------------------------------------------ */
+
+.kf-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kf-bar-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.kf-nav:hover {
+  background: rgba(124, 92, 255, 0.2);
+}
+
+/* Diamond keyframe toggle at the head of each animatable field. */
+.kf-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.kf-diamond {
+  width: 9px;
+  height: 9px;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--text-dim);
+  border-radius: 1px;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.kf-toggle:hover .kf-diamond {
+  border-color: var(--text);
+}
+
+/* Prop is animated but no keyframe sits at the playhead: hollow accent diamond. */
+.kf-toggle.is-animated .kf-diamond {
+  border-color: var(--accent);
+}
+
+/* A keyframe sits exactly at the playhead: filled. */
+.kf-toggle.is-here .kf-diamond,
+.kf-diamond.is-here {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .xform-section {
   display: flex;
   flex-direction: column;
@@ -503,7 +582,7 @@
 }
 
 .xform-field-label {
-  min-width: 52px;
+  min-width: 44px;
   color: var(--text-dim);
 }
 
@@ -1642,6 +1721,27 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+
+.export-warning {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 176, 32, 0.12);
+  border: 1px solid rgba(255, 176, 32, 0.3);
+  color: #ffce7a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.export-warning i {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.export-warning strong {
+  color: #ffe0ad;
 }
 
 .export-progress {

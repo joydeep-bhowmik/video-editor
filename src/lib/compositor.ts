@@ -1,4 +1,5 @@
 import { renderEffects, shadowFor } from "./effects";
+import { resolveTransform } from "./keyframes";
 import { findActiveClip } from "./timeline";
 import { findTransitionAt, drawTransitionFrame } from "./transitions";
 import { getClipVideo } from "./videoPool";
@@ -208,9 +209,9 @@ export function drawFrame(
           drawTransitionFrame(active.transition.kind, {
             ctx,
             imageA: imageForClip(clipA, videoA),
-            transformA: clipA.transform,
+            transformA: resolveTransform(clipA, time - clipA.start),
             imageB: imageForClip(clipB, videoB),
-            transformB: clipB.transform,
+            transformB: resolveTransform(clipB, time - clipB.start),
             progress: active.progress,
             canvasW,
             canvasH,
@@ -226,6 +227,7 @@ export function drawFrame(
     if (!source) continue;
     const video = getClipVideo(clip.id, source.url);
     if (video.readyState < 2) continue;
-    drawClip(ctx, imageForClip(clip, video), clip.transform, canvasW, canvasH, shadowFor(clip.effects));
+    const transform = resolveTransform(clip, time - clip.start);
+    drawClip(ctx, imageForClip(clip, video), transform, canvasW, canvasH, shadowFor(clip.effects));
   }
 }

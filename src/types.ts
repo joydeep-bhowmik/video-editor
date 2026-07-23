@@ -72,6 +72,16 @@ export interface Effect {
   spill?: number;
 }
 
+/** One animation keyframe: a value for a single transform property at a clip-local time. */
+export interface Keyframe {
+  id: string;
+  /** Which numeric transform field this animates (see AnimatableProp). */
+  prop: string;
+  /** Seconds from the clip's start on the timeline. */
+  time: number;
+  value: number;
+}
+
 export interface Clip {
   id: string;
   trackId: string;
@@ -79,9 +89,11 @@ export interface Clip {
   start: number;
   inPoint: number;
   outPoint: number;
+  /** Static transform; used directly when the clip has no keyframes for a given property. */
   transform: Transform;
   audioMuted: boolean;
   effects: Effect[];
+  keyframes: Keyframe[];
 }
 
 export type TransitionKind =

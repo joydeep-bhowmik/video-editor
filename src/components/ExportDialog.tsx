@@ -6,6 +6,8 @@ interface ExportDialogProps {
   projectWidth: number;
   projectHeight: number;
   duration: number;
+  /** True when any clip is keyframe-animated — ffmpeg renders those as a static snapshot. */
+  hasAnimation: boolean;
   onChange: (settings: ExportSettings) => void;
   onStart: () => void;
   onCancel: () => void;
@@ -57,6 +59,7 @@ export function ExportDialog({
   projectWidth,
   projectHeight,
   duration,
+  hasAnimation,
   onChange,
   onStart,
   onCancel,
@@ -64,6 +67,9 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const busy = progress !== null;
   const percent = progress ? Math.round(progress.ratio * 100) : 0;
+  // ffmpeg (and Auto, which resolves to it) can't render keyframe motion — warn so the user can
+  // switch to Fast when animation matters.
+  const animationWarning = hasAnimation && settings.engine !== "webcodecs";
 
   return (
     // Backdrop clicks only dismiss while idle — a render in flight shouldn't be closable by accident.
@@ -116,6 +122,15 @@ export function ExportDialog({
                 </span>
               </label>
             ))}
+            {animationWarning && (
+              <div className="export-warning">
+                <i className="ri-alert-line" aria-hidden="true" />
+                <span>
+                  This project has animated clips. This engine renders them frozen on one frame —
+                  choose <strong>Fast</strong> to keep the motion (that export has no sound).
+                </span>
+              </div>
+            )}
           </fieldset>
 
           <fieldset className="option-group" disabled={busy}>

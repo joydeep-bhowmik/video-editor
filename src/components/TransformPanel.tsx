@@ -1,16 +1,21 @@
 import { DEFAULT_TRANSFORM_BASE } from "../lib/constants";
+import { clipDuration } from "../lib/timeline";
+import { keyframeAt, propHasKeyframes, valueAt, type AnimatableProp } from "../lib/keyframes";
 import type { Clip, Transform } from "../types";
 
 interface TransformPanelProps {
   clip: Clip | undefined;
+  playhead: number;
   onChange: (t: Transform) => void;
+  onSetKeyframe: (prop: AnimatableProp, value: number) => void;
+  onToggleKeyframe: (prop: AnimatableProp) => void;
+  onSeekKeyframe: (dir: -1 | 1) => void;
   onBeginEdit: () => void;
   onEndEdit: () => void;
 }
 
-/** One numeric field, editable by slider drag or exact typing, showing an integer in `unit`. */
 interface FieldSpec {
-  key: keyof Transform;
+  key: AnimatableProp;
   label: string;
   min: number;
   max: number;
@@ -38,7 +43,16 @@ const SKEW: FieldSpec[] = [
   { key: "skewY", label: "Y", min: -60, max: 60, unit: "°", toDisplay: 1 },
 ];
 
-export function TransformPanel({ clip, onChange, onBeginEdit, onEndEdit }: TransformPanelProps) {
+export function TransformPanel({
+  clip,
+  playhead,
+  onChange,
+  onSetKeyframe,
+  onToggleKeyframe,
+  onSeekKeyframe,
+  onBeginEdit,
+  onEndEdit,
+}: TransformPanelProps) {
   if (!clip) {
     return (
       <div className="panel-empty">
@@ -48,8 +62,10 @@ export function TransformPanel({ clip, onChange, onBeginEdit, onEndEdit }: Trans
   }
 
   const t = clip.transform;
+  const dur = clipDuration(clip);
+  const localTime = Math.max(0, Math.min(dur, playhead - clip.start));
+  const animated = clip.keyframes.length > 0;
 
-  // Discrete edit (typing, toggling): a self-contained begin→change→end so it's one undo step.
   function commit(partial: Partial<Transform>) {
     onBeginEdit();
     onChange({ ...t, ...partial });
@@ -57,10 +73,36 @@ export function TransformPanel({ clip, onChange, onBeginEdit, onEndEdit }: Trans
   }
 
   function Field({ spec }: { spec: FieldSpec }) {
-    const raw = t[spec.key] as number;
-    const shown = Math.round(raw * spec.toDisplay);
+    const isAnimated = propHasKeyframes(clip!, spec.key);
+    const value = valueAt(clip!, spec.key, localTime);
+    const shown = Math.round(value * spec.toDisplay);
+    const kfHere = !!keyframeAt(clip!, spec.key, localTime);
+
+    // While a prop is animated, edits write a keyframe at the playhead; otherwise they set the
+    // static base value (the pre-animation behaviour).
+    const setRaw = (raw: number, discrete: boolean) => {
+      if (isAnimated) {
+        if (discrete) onBeginEdit();
+        onSetKeyframe(spec.key, raw);
+        if (discrete) onEndEdit();
+      } else if (discrete) {
+        commit({ [spec.key]: raw } as Partial<Transform>);
+      } else {
+        onChange({ ...t, [spec.key]: raw });
+      }
+    };
+
     return (
       <label className="xform-field">
+        <button
+          type="button"
+          className={"kf-toggle" + (kfHere ? " is-here" : isAnimated ? " is-animated" : "")}
+          onClick={() => onToggleKeyframe(spec.key)}
+          data-tip={kfHere ? "Remove keyframe here" : "Add keyframe at the playhead"}
+          aria-label="Toggle keyframe"
+        >
+          <span className="kf-diamond" />
+        </button>
         <span className="xform-field-label">{spec.label}</span>
         <input
           type="range"
@@ -69,7 +111,7 @@ export function TransformPanel({ clip, onChange, onBeginEdit, onEndEdit }: Trans
           value={shown}
           onPointerDown={onBeginEdit}
           onPointerUp={onEndEdit}
-          onChange={(e) => onChange({ ...t, [spec.key]: Number(e.target.value) / spec.toDisplay })}
+          onChange={(e) => setRaw(Number(e.target.value) / spec.toDisplay, false)}
         />
         <input
           type="number"
@@ -77,7 +119,7 @@ export function TransformPanel({ clip, onChange, onBeginEdit, onEndEdit }: Trans
           value={shown}
           onChange={(e) => {
             const v = Number(e.target.value);
-            if (!Number.isNaN(v)) commit({ [spec.key]: v / spec.toDisplay } as Partial<Transform>);
+            if (!Number.isNaN(v)) setRaw(v / spec.toDisplay, true);
           }}
         />
         <span className="xform-unit">{spec.unit}</span>
@@ -101,6 +143,32 @@ export function TransformPanel({ clip, onChange, onBeginEdit, onEndEdit }: Trans
 
   return (
     <div className="effects-body xform-body">
+      {animated && (
+        <div className="kf-bar">
+          <button
+            type="button"
+            className="kf-nav"
+            onClick={() => onSeekKeyframe(-1)}
+            data-tip="Previous keyframe"
+            aria-label="Previous keyframe"
+          >
+            <i className="ri-skip-back-mini-line" aria-hidden="true" />
+          </button>
+          <span className="kf-bar-label">
+            <span className="kf-diamond is-here" /> Animating · {localTime.toFixed(2)}s
+          </span>
+          <button
+            type="button"
+            className="kf-nav"
+            onClick={() => onSeekKeyframe(1)}
+            data-tip="Next keyframe"
+            aria-label="Next keyframe"
+          >
+            <i className="ri-skip-forward-mini-line" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       <Section icon="ri-drag-move-2-line" title="Position" fields={POSITION} />
 
       <div className="xform-section">

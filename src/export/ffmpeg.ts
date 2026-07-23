@@ -3,6 +3,7 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { EXPORT_FPS } from "../lib/constants";
 import { computeContainSize } from "../lib/compositor";
 import { clipDuration, totalDuration } from "../lib/timeline";
+import { resolveTransform } from "../lib/keyframes";
 import type { Clip, Effect, TransitionKind } from "../types";
 import type { ExportRequest } from "./index";
 import { ExportCancelledError, QUALITY_PRESETS, throwIfAborted } from "./types";
@@ -210,7 +211,9 @@ export async function exportFfmpeg({
     timeShift?: number
   ): { label: string; cxPx: number; cyPx: number } {
     const source = sourceMap.get(clip.sourceId);
-    const { transform } = clip;
+    // ffmpeg's per-clip filter graph is static, so an animated clip is flattened to a single
+    // snapshot at its midpoint (the canvas engines animate properly — see the export dialog note).
+    const transform = resolveTransform(clip, clipDuration(clip) / 2);
 
     // Crop trims the source before fitting, so the fitted box uses the *kept* aspect ratio.
     const keepW = Math.max(0.01, 1 - transform.cropLeft - transform.cropRight);

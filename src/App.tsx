@@ -11,6 +11,14 @@ import {
 import { historyReducer, initialHistory } from "./lib/history";
 import { CancelledError } from "./lib/cancel";
 import { makeEffect, type EffectExtraKey } from "./lib/effects";
+import {
+  keyframeAt,
+  keyframeTimes,
+  removeKeyframeAt,
+  upsertKeyframe,
+  valueAt,
+  type AnimatableProp,
+} from "./lib/keyframes";
 import { loadVideoMeta } from "./lib/videoMeta";
 import { extractWaveform } from "./lib/waveform";
 import { MediaPool } from "./components/MediaPool";
@@ -172,6 +180,7 @@ export default function App() {
       transform: { ...(isBaseTrack ? DEFAULT_TRANSFORM_BASE : DEFAULT_TRANSFORM_OVERLAY) },
       audioMuted: false,
       effects: [],
+      keyframes: [],
     };
 
     commitEdit((prev) => {
@@ -245,6 +254,49 @@ export default function App() {
     }));
   }
 
+  // Clip-local time of the playhead for a clip, clamped to its span — where keyframes are written.
+  function localTimeFor(clip: Clip) {
+    return Math.max(0, Math.min(clipDuration(clip), playhead - clip.start));
+  }
+
+  /** Write (or move) a keyframe for one property at the playhead. Continuous when dragging. */
+  function handleSetKeyframe(clipId: string, prop: AnimatableProp, value: number) {
+    updateLive((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => {
+        if (c.id !== clipId) return c;
+        return { ...c, keyframes: upsertKeyframe(c.keyframes, prop, localTimeFor(c), value) };
+      }),
+    }));
+  }
+
+  /** Diamond toggle: add a keyframe at the playhead (capturing the current value), or drop the one there. */
+  function handleToggleKeyframe(clipId: string, prop: AnimatableProp) {
+    commitEdit((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => {
+        if (c.id !== clipId) return c;
+        const t = localTimeFor(c);
+        const existing = keyframeAt(c, prop, t);
+        const keyframes = existing
+          ? removeKeyframeAt(c.keyframes, prop, t)
+          : upsertKeyframe(c.keyframes, prop, t, valueAt(c, prop, t));
+        return { ...c, keyframes };
+      }),
+    }));
+  }
+
+  /** Jump the playhead to the previous/next keyframe time within the given clip. */
+  function handleSeekKeyframe(clip: Clip, dir: -1 | 1) {
+    const times = keyframeTimes(clip).map((t) => clip.start + t);
+    const cur = playhead;
+    const target = dir < 0 ? [...times].reverse().find((t) => t < cur - 1e-4) : times.find((t) => t > cur + 1e-4);
+    if (target !== undefined) {
+      setIsPlaying(false);
+      setPlayhead(target);
+    }
+  }
+
   function handleTrimClip(id: string, inPoint: number, outPoint: number) {
     updateLive((prev) => {
       const clip = prev.clips.find((c) => c.id === id);
@@ -301,8 +353,9 @@ export default function App() {
       trackId: newTrack.id,
       transform: { ...DEFAULT_TRANSFORM_BASE },
       audioMuted: false,
-      // The detached copy is audio-only, so visual effects don't carry over.
+      // The detached copy is audio-only, so visual effects/animation don't carry over.
       effects: [],
+      keyframes: [],
     };
     commitEdit((prev) => ({
       tracks: [...prev.tracks, newTrack],
@@ -701,7 +754,11 @@ export default function App() {
           transform={
             <TransformPanel
               clip={selectedClip}
+              playhead={playhead}
               onChange={(t) => selectedClipId && handleTransformClip(selectedClipId, t)}
+              onSetKeyframe={(prop, v) => selectedClipId && handleSetKeyframe(selectedClipId, prop, v)}
+              onToggleKeyframe={(prop) => selectedClipId && handleToggleKeyframe(selectedClipId, prop)}
+              onSeekKeyframe={(dir) => selectedClip && handleSeekKeyframe(selectedClip, dir)}
               onBeginEdit={beginLiveEdit}
               onEndEdit={endLiveEdit}
             />
@@ -738,6 +795,7 @@ export default function App() {
           projectWidth={projectSize.width}
           projectHeight={projectSize.height}
           duration={duration}
+          hasAnimation={clips.some((c) => c.keyframes.length > 0)}
           onChange={setExportSettings}
           onStart={handleExport}
           onCancel={handleCancelExport}

@@ -57,8 +57,22 @@ export function splitClipAt(
   if (offset < MIN_SPLIT_MARGIN || offset > dur - MIN_SPLIT_MARGIN) return null;
 
   const splitAt = clip.inPoint + offset;
-  const first: Clip = { ...clip, outPoint: splitAt };
-  const second: Clip = { ...clip, id: crypto.randomUUID(), start: time, inPoint: splitAt };
+  // Keyframes are clip-local (seconds from the clip's start). The left half keeps those up to the
+  // cut; the right half keeps the rest, rebased so its own start is again t=0.
+  const first: Clip = {
+    ...clip,
+    outPoint: splitAt,
+    keyframes: clip.keyframes.filter((k) => k.time <= offset),
+  };
+  const second: Clip = {
+    ...clip,
+    id: crypto.randomUUID(),
+    start: time,
+    inPoint: splitAt,
+    keyframes: clip.keyframes
+      .filter((k) => k.time > offset)
+      .map((k) => ({ ...k, id: crypto.randomUUID(), time: k.time - offset })),
+  };
   return { first, second };
 }
 
