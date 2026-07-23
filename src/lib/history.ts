@@ -16,7 +16,10 @@ export type HistoryAction<T> =
   // leaving the already-updated present as-is.
   | { type: "snapshotCommit"; snapshot: T }
   | { type: "undo" }
-  | { type: "redo" };
+  | { type: "redo" }
+  // Hard-replaces present and wipes past/future — used when switching to a different project,
+  // where the old undo stack no longer means anything.
+  | { type: "reset"; present: T };
 
 export function historyReducer<T>(state: HistoryState<T>, action: HistoryAction<T>): HistoryState<T> {
   switch (action.type) {
@@ -43,6 +46,9 @@ export function historyReducer<T>(state: HistoryState<T>, action: HistoryAction<
       if (state.future.length === 0) return state;
       const next = state.future[0];
       return { past: [...state.past, state.present], present: next, future: state.future.slice(1) };
+    }
+    case "reset": {
+      return { past: [], present: action.present, future: [] };
     }
   }
 }

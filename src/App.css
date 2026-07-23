@@ -195,7 +195,7 @@
 }
 
 .brand {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 8px;
   font-size: 15px;
@@ -207,6 +207,53 @@
 .brand i {
   font-size: 21px;
   color: var(--accent);
+}
+
+.brand-button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  min-width: 0;
+  max-width: 120px;
+}
+
+.brand-button:hover {
+  background: var(--raised);
+}
+
+.brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: none;
+}
+
+.brand-caret {
+  font-size: 16px !important;
+  color: var(--text-dim) !important;
+  display: none;
+}
+
+.app-loading {
+  height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.app-loading i {
+  font-size: 40px;
+  color: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 .topbar-spacer {
@@ -890,6 +937,7 @@
 
 .media-pool-meta {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
   gap: 3px;
@@ -906,6 +954,29 @@
   font-size: 12px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+
+.media-pool-usage {
+  color: var(--accent);
+}
+
+.media-pool-delete {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.media-pool-delete:hover {
+  background: var(--raised);
+  color: #ff6b6b;
 }
 
 .media-pool-hint {
@@ -1747,6 +1818,210 @@
   gap: 20px;
 }
 
+.modal-small {
+  max-width: 380px;
+}
+
+.modal-large {
+  max-width: 640px;
+}
+
+.confirm-message {
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---------- Project manager ------------------------------------------------ */
+
+.project-new-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+}
+
+.project-row.is-current {
+  border-color: var(--accent);
+  background: rgba(124, 92, 255, 0.08);
+}
+
+.project-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+
+.project-row-main:hover {
+  background: var(--raised);
+}
+
+.project-row-main > i {
+  font-size: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.project-row-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-row-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.project-rename-input {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 6px;
+  width: 100%;
+}
+
+.project-row-action {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.project-row-action:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.project-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.project-name-field input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 9px 10px;
+}
+
+/* ---------- Aspect ratio picker --------------------------------------------- */
+
+.ar-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ar-tile {
+  gap: 4px;
+}
+
+.ar-swatch {
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid var(--text-dim);
+  border-radius: 3px;
+  display: block;
+}
+
+.effect-tile.ar-tile.is-applied .ar-swatch {
+  border-color: var(--accent);
+}
+
+.ar-tile-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ar-custom {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+}
+
+.ar-custom.is-active {
+  border-color: var(--accent);
+}
+
+.ar-custom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: 1;
+}
+
+.ar-custom-field input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 14px;
+  padding: 8px 9px;
+}
+
+.ar-custom-x {
+  color: var(--text-dim);
+  padding-bottom: 9px;
+}
+
 .modal-foot {
   display: flex;
   justify-content: flex-end;
@@ -1946,6 +2221,15 @@
 
   .brand {
     display: flex;
+  }
+
+  .brand-button {
+    max-width: 220px;
+  }
+
+  .brand-name,
+  .brand-caret {
+    display: inline;
   }
 
   .icon-button-label {

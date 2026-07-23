@@ -3,6 +3,7 @@ import { IconButton } from "./IconButton";
 import type { ExportProgress } from "../export";
 
 interface TopBarProps {
+  projectName: string;
   canUndo: boolean;
   canRedo: boolean;
   canExport: boolean;
@@ -14,10 +15,13 @@ interface TopBarProps {
   onUndo: () => void;
   onRedo: () => void;
   onOpenExport: () => void;
+  onOpenProjects: () => void;
+  onOpenAspectRatio: () => void;
   onTogglePanel: (panel: "media" | "inspector") => void;
 }
 
 export function TopBar({
+  projectName,
   canUndo,
   canRedo,
   canExport,
@@ -29,6 +33,8 @@ export function TopBar({
   onUndo,
   onRedo,
   onOpenExport,
+  onOpenProjects,
+  onOpenAspectRatio,
   onTogglePanel,
 }: TopBarProps) {
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
@@ -40,10 +46,22 @@ export function TopBar({
 
   return (
     <header className="topbar">
-      <div className="brand">
+      <button
+        type="button"
+        className="brand brand-button"
+        onClick={onOpenProjects}
+        data-tip="Projects — switch, rename or create"
+      >
         <i className="ri-clapperboard-fill" aria-hidden="true" />
-        <span>Studio</span>
-      </div>
+        <span className="brand-name">{projectName}</span>
+        <i className="ri-arrow-down-s-line brand-caret" aria-hidden="true" />
+      </button>
+      <IconButton
+        icon="ri-aspect-ratio-line"
+        label="Canvas"
+        hint="Change aspect ratio / resolution"
+        onClick={onOpenAspectRatio}
+      />
 
       {importProgress ? (
         // Swaps to a real button while busy: the idle control is a <label> wrapping a file

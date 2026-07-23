@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import "./App.css";
 import { ExportCancelledError, runExport, type ExportProgress, type ExportSettings } from "./export";
 import {
@@ -23,6 +23,20 @@ import {
 } from "./lib/keyframes";
 import { loadImageMeta, loadVideoMeta } from "./lib/videoMeta";
 import { extractWaveform } from "./lib/waveform";
+import {
+  deleteMedia,
+  deleteProject,
+  getLastOpenedProjectId,
+  getMediaForProject,
+  getProject,
+  listProjects,
+  putMedia,
+  putProject,
+  setLastOpenedProjectId,
+  toFile,
+  type ProjectDoc,
+} from "./lib/db";
+import { matchPreset } from "./lib/aspectRatios";
 import { MediaPool } from "./components/MediaPool";
 import { Preview } from "./components/Preview";
 import { Timeline } from "./components/Timeline";
@@ -33,6 +47,9 @@ import { TransitionPanel, type TransitionSlot } from "./components/TransitionPan
 import { EffectsPanel } from "./components/EffectsPanel";
 import { TransformPanel } from "./components/TransformPanel";
 import { InspectorPanel, type InspectorTab } from "./components/InspectorPanel";
+import { AspectRatioPicker } from "./components/AspectRatioPicker";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ProjectManagerDialog, type ProjectSummary } from "./components/ProjectManagerDialog";
 import {
   clipDuration,
   isClipActiveAt,
@@ -43,6 +60,8 @@ import {
 } from "./lib/timeline";
 import { applyTransition, DEFAULT_TRANSITION_DURATION, retimeTransition } from "./lib/transitions";
 import type { Clip, EffectKind, MediaKind, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
+
+const AUTOSAVE_DEBOUNCE_MS = 600;
 
 const FRAME_STEP = 1 / 30;
 
@@ -85,6 +104,28 @@ export default function App() {
   const [projectSize, setProjectSize] = useState({ width: DEFAULT_PROJECT_WIDTH, height: DEFAULT_PROJECT_HEIGHT });
   const [importProgress, setImportProgress] = useState<{ name: string; ratio: number } | null>(null);
 
+  // Project management + persistence.
+  const [ready, setReady] = useState(false);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState("Untitled project");
+  const [aspectRatioId, setAspectRatioId] = useState("x-16-9");
+  const [projectManagerOpen, setProjectManagerOpen] = useState(false);
+  const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
+  const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+  const restoringRef = useRef(false);
+  const createdAtRef = useRef(Date.now());
+  const playheadRef = useRef(0);
+  useEffect(() => {
+    playheadRef.current = playhead;
+  }, [playhead]);
+
   const duration = totalDuration(clips);
 
   function commitEdit(updater: (prev: EditState) => EditState) {
@@ -109,6 +150,233 @@ export default function App() {
   }
   const undo = useCallback(() => dispatch({ type: "undo" }), []);
   const redo = useCallback(() => dispatch({ type: "redo" }), []);
+
+  function makeBlankProjectDoc(name = "Untitled project", width = DEFAULT_PROJECT_WIDTH, height = DEFAULT_PROJECT_HEIGHT, presetId = "x-16-9"): ProjectDoc {
+    const now = Date.now();
+    return {
+      id: crypto.randomUUID(),
+      name,
+      createdAt: now,
+      updatedAt: now,
+      width,
+      height,
+      aspectRatioId: presetId,
+      tracks: [makeTrack(1)],
+      clips: [],
+      transitions: [],
+      exportSettings: { engine: "auto", quality: "balanced" },
+      playhead: 0,
+    };
+  }
+
+  /** Loads a project doc + its media into every piece of project-scoped state. Used at startup and on switch. */
+  async function applyProjectDoc(doc: ProjectDoc) {
+    restoringRef.current = true;
+    sources.forEach((s) => URL.revokeObjectURL(s.url));
+    const mediaDocs = await getMediaForProject(doc.id);
+    const restoredSources: SourceVideo[] = mediaDocs.map((m) => {
+      const file = toFile(m);
+      return {
+        id: m.id,
+        kind: m.kind,
+        url: URL.createObjectURL(file),
+        name: m.name,
+        duration: m.duration,
+        thumbnail: m.thumbnail,
+        filmstrip: m.filmstrip,
+        waveform: m.waveform,
+        width: m.width,
+        height: m.height,
+        file,
+      };
+    });
+    setSources(restoredSources);
+    dispatch({ type: "reset", present: { tracks: doc.tracks, clips: doc.clips, transitions: doc.transitions } });
+    setProjectSize({ width: doc.width, height: doc.height });
+    setAspectRatioId(doc.aspectRatioId ?? matchPreset(doc.width, doc.height));
+    setExportSettings(doc.exportSettings);
+    setPlayhead(doc.playhead ?? 0);
+    createdAtRef.current = doc.createdAt;
+    setCurrentProjectId(doc.id);
+    setProjectName(doc.name);
+    setLastOpenedProjectId(doc.id);
+    setSelectedClipId(null);
+    setActiveTransitionSlot(null);
+    setIsPlaying(false);
+    restoringRef.current = false;
+  }
+
+  // Restore the last-opened project (or the most recently edited one, or a fresh blank project)
+  // on launch — gated behind `ready` so nothing flashes a blank editor before this resolves.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const lastId = getLastOpenedProjectId();
+      let doc = lastId ? await getProject(lastId) : undefined;
+      if (!doc) {
+        const all = await listProjects();
+        doc = all[0];
+      }
+      if (!doc) {
+        doc = makeBlankProjectDoc();
+        await putProject(doc);
+      }
+      if (cancelled) return;
+      await applyProjectDoc(doc);
+      if (cancelled) return;
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save: debounced so rapid edits (drags, slider drags) coalesce into one write. Excludes
+  // raw `playhead` since Preview drives it every animation frame during playback — that would
+  // reset this debounce ~60x/sec and the doc would never save. playheadRef is read at save time
+  // instead, plus an immediate flush on pause (see the isPlaying effect below).
+  useEffect(() => {
+    if (!ready || restoringRef.current || !currentProjectId) return;
+    const handle = setTimeout(() => {
+      const doc: ProjectDoc = {
+        id: currentProjectId,
+        name: projectName,
+        createdAt: createdAtRef.current,
+        updatedAt: Date.now(),
+        width: projectSize.width,
+        height: projectSize.height,
+        aspectRatioId,
+        tracks,
+        clips,
+        transitions,
+        exportSettings,
+        playhead: playheadRef.current,
+      };
+      putProject(doc).catch((err) => console.error("autosave failed", err));
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [ready, currentProjectId, tracks, clips, transitions, exportSettings, projectSize, aspectRatioId, projectName]);
+
+  // Flush the playhead position promptly when playback pauses, since it's excluded from the
+  // debounced effect above.
+  useEffect(() => {
+    if (!ready || restoringRef.current || !currentProjectId || isPlaying) return;
+    putProject({
+      id: currentProjectId,
+      name: projectName,
+      createdAt: createdAtRef.current,
+      updatedAt: Date.now(),
+      width: projectSize.width,
+      height: projectSize.height,
+      aspectRatioId,
+      tracks,
+      clips,
+      transitions,
+      exportSettings,
+      playhead: playheadRef.current,
+    }).catch((err) => console.error("autosave failed", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+
+  function refreshProjectList() {
+    listProjects().then((all) =>
+      setProjectList(all.map((d) => ({ id: d.id, name: d.name, updatedAt: d.updatedAt, width: d.width, height: d.height })))
+    );
+  }
+
+  async function switchToProject(doc: ProjectDoc) {
+    await applyProjectDoc(doc);
+    setProjectManagerOpen(false);
+  }
+
+  async function handleCreateProject(name: string, width: number, height: number, presetId: string) {
+    const doc = makeBlankProjectDoc(name, width, height, presetId);
+    await putProject(doc);
+    await switchToProject(doc);
+  }
+
+  async function handleOpenProject(id: string) {
+    if (id === currentProjectId) {
+      setProjectManagerOpen(false);
+      return;
+    }
+    const doc = await getProject(id);
+    if (doc) await switchToProject(doc);
+  }
+
+  function handleRenameProject(id: string, name: string) {
+    if (id === currentProjectId) {
+      setProjectName(name);
+      refreshProjectList();
+    } else {
+      getProject(id)
+        .then((d) => d && putProject({ ...d, name, updatedAt: Date.now() }))
+        .then(refreshProjectList);
+    }
+  }
+
+  function handleDeleteProject(id: string) {
+    setConfirmState({
+      title: "Delete project",
+      message: "This deletes the project and all of its imported media permanently. This cannot be undone.",
+      confirmLabel: "Delete project",
+      danger: true,
+      onConfirm: async () => {
+        setConfirmState(null);
+        await deleteProject(id);
+        if (id === currentProjectId) {
+          const remaining = await listProjects();
+          if (remaining.length > 0) {
+            await switchToProject(remaining[0]);
+          } else {
+            const blank = makeBlankProjectDoc();
+            await putProject(blank);
+            await switchToProject(blank);
+          }
+        }
+        refreshProjectList();
+      },
+    });
+  }
+
+  function handleChangeAspectRatio(width: number, height: number, presetId: string) {
+    setProjectSize({ width, height });
+    setAspectRatioId(presetId);
+  }
+
+  function handleDeleteSource(sourceId: string) {
+    const usedClipIds = clips.filter((c) => c.sourceId === sourceId).map((c) => c.id);
+    const doDelete = () => {
+      setConfirmState(null);
+      commitEdit((prev) => ({
+        ...prev,
+        clips: prev.clips.filter((c) => c.sourceId !== sourceId),
+        transitions: prev.transitions.filter(
+          (t) => !usedClipIds.includes(t.leftClipId) && !usedClipIds.includes(t.rightClipId)
+        ),
+      }));
+      setSources((prev) => {
+        const src = prev.find((s) => s.id === sourceId);
+        if (src) URL.revokeObjectURL(src.url);
+        return prev.filter((s) => s.id !== sourceId);
+      });
+      if (selectedClipId && usedClipIds.includes(selectedClipId)) setSelectedClipId(null);
+      deleteMedia(sourceId).catch((err) => console.error("failed to delete media", err));
+    };
+
+    if (usedClipIds.length > 0) {
+      setConfirmState({
+        title: "Delete media",
+        message: `This media is used in ${usedClipIds.length} clip${usedClipIds.length > 1 ? "s" : ""} on the timeline. Removing it will delete ${usedClipIds.length > 1 ? "those clips" : "that clip"} too.`,
+        confirmLabel: "Delete anyway",
+        danger: true,
+        onConfirm: doDelete,
+      });
+    } else {
+      doDelete();
+    }
+  }
 
   async function handleImport(files: FileList) {
     const controller = new AbortController();
@@ -136,28 +404,44 @@ export default function App() {
         const waveform = kind === "image" ? { min: [], max: [] } : await extractWaveform(file, signal);
         const sourceId = crypto.randomUUID();
 
-        setSources((prev) => {
-          // Adopt the first visual source's dimensions as the project canvas size.
-          if (prev.length === 0 && kind !== "audio" && meta.width && meta.height) {
-            setProjectSize({ width: meta.width, height: meta.height });
-          }
-          return [
-            ...prev,
-            {
-              id: sourceId,
-              kind,
-              url,
-              name: file.name,
-              duration: meta.duration,
-              thumbnail: meta.thumbnail,
-              filmstrip: meta.filmstrip,
-              waveform,
-              width: meta.width,
-              height: meta.height,
-              file,
-            },
-          ];
-        });
+        if (!currentProjectId) throw new Error("No project is open yet");
+        try {
+          await putMedia({
+            id: sourceId,
+            projectId: currentProjectId,
+            kind,
+            name: file.name,
+            mimeType: file.type,
+            duration: meta.duration,
+            thumbnail: meta.thumbnail,
+            filmstrip: meta.filmstrip,
+            waveform,
+            width: meta.width,
+            height: meta.height,
+            blob: file,
+          });
+        } catch (err) {
+          console.error("failed to save media", err);
+          alert(`Failed to save ${file.name} — your device's storage may be full.`);
+          continue;
+        }
+
+        setSources((prev) => [
+          ...prev,
+          {
+            id: sourceId,
+            kind,
+            url,
+            name: file.name,
+            duration: meta.duration,
+            thumbnail: meta.thumbnail,
+            filmstrip: meta.filmstrip,
+            waveform,
+            width: meta.width,
+            height: meta.height,
+            file,
+          },
+        ]);
       } catch (err) {
         // Cancelling is a normal outcome; stop quietly rather than reporting a failure.
         if (err instanceof CancelledError) break;
@@ -693,9 +977,24 @@ export default function App() {
     return { start: rightClip.start, end: rightClip.start + activeTransition.duration };
   })();
 
+  const sourceUsage = useMemo(() => {
+    const usage: Record<string, number> = {};
+    for (const c of clips) usage[c.sourceId] = (usage[c.sourceId] ?? 0) + 1;
+    return usage;
+  }, [clips]);
+
+  if (!ready) {
+    return (
+      <div className="app-loading">
+        <i className="ri-clapperboard-fill" aria-hidden="true" />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <TopBar
+        projectName={projectName}
         canExport={clips.length > 0}
         canUndo={canUndo}
         canRedo={canRedo}
@@ -707,6 +1006,11 @@ export default function App() {
         onUndo={undo}
         onRedo={redo}
         onOpenExport={() => setExportOpen(true)}
+        onOpenProjects={() => {
+          refreshProjectList();
+          setProjectManagerOpen(true);
+        }}
+        onOpenAspectRatio={() => setAspectRatioOpen(true)}
         onTogglePanel={(p) => setMobilePanel((cur) => (cur === p ? null : p))}
       />
       <div className="app-body">
@@ -715,8 +1019,10 @@ export default function App() {
           sources={sources}
           importProgress={importProgress}
           open={mobilePanel === "media"}
+          usage={sourceUsage}
           onClose={() => setMobilePanel(null)}
           onDragSourceChange={setDraggingSourceId}
+          onDeleteSource={handleDeleteSource}
         />
         <div className="main-column">
           <Preview
@@ -828,6 +1134,51 @@ export default function App() {
           onStart={handleExport}
           onCancel={handleCancelExport}
           onClose={() => setExportOpen(false)}
+        />
+      )}
+
+      {projectManagerOpen && currentProjectId && (
+        <ProjectManagerDialog
+          projects={projectList}
+          currentProjectId={currentProjectId}
+          onOpen={handleOpenProject}
+          onRename={handleRenameProject}
+          onDelete={handleDeleteProject}
+          onCreate={handleCreateProject}
+          onClose={() => setProjectManagerOpen(false)}
+        />
+      )}
+
+      {aspectRatioOpen && (
+        <div className="modal-backdrop" onClick={() => setAspectRatioOpen(false)}>
+          <div className="modal modal-large" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <i className="ri-aspect-ratio-line" aria-hidden="true" />
+              <span>Canvas size</span>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setAspectRatioOpen(false)}
+                aria-label="Close"
+              >
+                <i className="ri-close-line" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="modal-body">
+              <AspectRatioPicker width={projectSize.width} height={projectSize.height} onSelect={handleChangeAspectRatio} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          danger={confirmState.danger}
+          onConfirm={confirmState.onConfirm}
+          onCancel={() => setConfirmState(null)}
         />
       )}
     </div>

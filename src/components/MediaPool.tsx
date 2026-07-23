@@ -6,8 +6,11 @@ interface MediaPoolProps {
   importProgress: { name: string; ratio: number } | null;
   /** Drawer state — only meaningful on small screens; on desktop the panel is always shown. */
   open: boolean;
+  /** How many clips on the timeline reference each source, keyed by source id. */
+  usage: Record<string, number>;
   onClose: () => void;
   onDragSourceChange: (sourceId: string | null) => void;
+  onDeleteSource: (sourceId: string) => void;
 }
 
 function formatDuration(t: number) {
@@ -32,10 +35,14 @@ const KIND_ICON: Record<MediaKind, string> = {
 
 function MediaItem({
   source,
+  usedCount,
   onDragSourceChange,
+  onDeleteSource,
 }: {
   source: SourceVideo;
+  usedCount: number;
   onDragSourceChange: (id: string | null) => void;
+  onDeleteSource: (id: string) => void;
 }) {
   return (
     <div
@@ -62,8 +69,21 @@ function MediaItem({
           <span className="media-pool-name">{source.name}</span>
           <span className="media-pool-duration">
             {source.kind === "image" ? "Still image" : formatDuration(source.duration)}
+            {usedCount > 0 && <span className="media-pool-usage"> · in use ×{usedCount}</span>}
           </span>
         </div>
+        <button
+          type="button"
+          className="media-pool-delete"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteSource(source.id);
+          }}
+          data-tip={usedCount > 0 ? "Remove — also deletes it from the timeline" : "Remove from your media"}
+          aria-label={`Delete ${source.name}`}
+        >
+          <i className="ri-delete-bin-line" aria-hidden="true" />
+        </button>
       </div>
       {source.waveform.max.length > 0 && (
         <Waveform className="media-pool-waveform" peaks={source.waveform} />
@@ -72,7 +92,7 @@ function MediaItem({
   );
 }
 
-export function MediaPool({ sources, importProgress, open, onClose, onDragSourceChange }: MediaPoolProps) {
+export function MediaPool({ sources, importProgress, open, usage, onClose, onDragSourceChange, onDeleteSource }: MediaPoolProps) {
   return (
     <div className={"media-pool side-panel" + (open ? " is-open" : "")}>
       <div className="side-panel-header">
@@ -113,7 +133,13 @@ export function MediaPool({ sources, importProgress, open, onClose, onDragSource
                 <span className="media-group-count">{items.length}</span>
               </div>
               {items.map((source) => (
-                <MediaItem key={source.id} source={source} onDragSourceChange={onDragSourceChange} />
+                <MediaItem
+                  key={source.id}
+                  source={source}
+                  usedCount={usage[source.id] ?? 0}
+                  onDragSourceChange={onDragSourceChange}
+                  onDeleteSource={onDeleteSource}
+                />
               ))}
             </div>
           );
