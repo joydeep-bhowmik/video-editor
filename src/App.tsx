@@ -111,6 +111,9 @@ export default function App() {
   const [aspectRatioId, setAspectRatioId] = useState("x-16-9");
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
+  const [pendingAspectRatio, setPendingAspectRatio] = useState<{ width: number; height: number; presetId: string } | null>(
+    null
+  );
   const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
   const [confirmState, setConfirmState] = useState<{
     title: string;
@@ -1010,7 +1013,10 @@ export default function App() {
           refreshProjectList();
           setProjectManagerOpen(true);
         }}
-        onOpenAspectRatio={() => setAspectRatioOpen(true)}
+        onOpenAspectRatio={() => {
+          setPendingAspectRatio({ width: projectSize.width, height: projectSize.height, presetId: aspectRatioId });
+          setAspectRatioOpen(true);
+        }}
         onTogglePanel={(p) => setMobilePanel((cur) => (cur === p ? null : p))}
       />
       <div className="app-body">
@@ -1149,7 +1155,7 @@ export default function App() {
         />
       )}
 
-      {aspectRatioOpen && (
+      {aspectRatioOpen && pendingAspectRatio && (
         <div className="modal-backdrop" onClick={() => setAspectRatioOpen(false)}>
           <div className="modal modal-large" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
@@ -1165,7 +1171,27 @@ export default function App() {
               </button>
             </div>
             <div className="modal-body">
-              <AspectRatioPicker width={projectSize.width} height={projectSize.height} onSelect={handleChangeAspectRatio} />
+              <AspectRatioPicker
+                width={pendingAspectRatio.width}
+                height={pendingAspectRatio.height}
+                onSelect={(width, height, presetId) => setPendingAspectRatio({ width, height, presetId })}
+              />
+            </div>
+            <div className="modal-foot">
+              <button type="button" className="btn" onClick={() => setAspectRatioOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  handleChangeAspectRatio(pendingAspectRatio.width, pendingAspectRatio.height, pendingAspectRatio.presetId);
+                  setAspectRatioOpen(false);
+                }}
+              >
+                <i className="ri-check-line" aria-hidden="true" />
+                <span>Change</span>
+              </button>
             </div>
           </div>
         </div>
