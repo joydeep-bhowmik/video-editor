@@ -3,8 +3,11 @@ export interface WaveformPeaks {
   max: number[];
 }
 
+export type MediaKind = "video" | "audio" | "image";
+
 export interface SourceVideo {
   id: string;
+  kind: MediaKind;
   url: string;
   name: string;
   duration: number;

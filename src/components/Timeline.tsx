@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MIN_CLIP_DURATION, PX_PER_SEC, TRACK_HEIGHT } from "../lib/constants";
+import { IMAGE_MAX_DURATION, MIN_CLIP_DURATION, PX_PER_SEC, TRACK_HEIGHT } from "../lib/constants";
 import { clipDuration, planInsert, totalDuration, type InsertPlan } from "../lib/timeline";
 import { keyframeColumns, keyframeIdsAt } from "../lib/keyframes";
 import { sliceWaveform } from "../lib/waveform";
@@ -314,7 +314,8 @@ export function Timeline({
         );
         onTrimClip(clip.id, newIn, clip.outPoint);
       } else {
-        const maxOut = source?.duration ?? drag.originalOut;
+        // A still image has no fixed length, so it can be stretched well past its default.
+        const maxOut = source?.kind === "image" ? IMAGE_MAX_DURATION : source?.duration ?? drag.originalOut;
         const newOut = Math.max(
           Math.min(drag.originalOut + deltaSec, maxOut),
           drag.originalIn + MIN_CLIP_DURATION

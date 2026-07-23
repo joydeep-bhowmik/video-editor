@@ -6,6 +6,7 @@ import {
   DEFAULT_PROJECT_WIDTH,
   DEFAULT_TRANSFORM_BASE,
   DEFAULT_TRANSFORM_OVERLAY,
+  IMAGE_DEFAULT_DURATION,
   MIN_CLIP_DURATION,
 } from "./lib/constants";
 import { historyReducer, initialHistory } from "./lib/history";
@@ -20,7 +21,7 @@ import {
   valueAt,
   type AnimatableProp,
 } from "./lib/keyframes";
-import { loadVideoMeta } from "./lib/videoMeta";
+import { loadImageMeta, loadVideoMeta } from "./lib/videoMeta";
 import { extractWaveform } from "./lib/waveform";
 import { MediaPool } from "./components/MediaPool";
 import { Preview } from "./components/Preview";
@@ -41,7 +42,7 @@ import {
   totalDuration,
 } from "./lib/timeline";
 import { applyTransition, DEFAULT_TRANSITION_DURATION, retimeTransition } from "./lib/transitions";
-import type { Clip, EffectKind, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
+import type { Clip, EffectKind, MediaKind, SourceVideo, Track, Transform, Transition, TransitionKind } from "./types";
 
 const FRAME_STEP = 1 / 30;
 
@@ -118,24 +119,33 @@ export default function App() {
       if (signal.aborted) break;
       setImportProgress({ name: file.name, ratio: 0 });
       try {
+        const kind: MediaKind = file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("audio/")
+            ? "audio"
+            : "video";
         const url = URL.createObjectURL(file);
-        const meta = await loadVideoMeta(
-          url,
-          (ratio) => setImportProgress({ name: file.name, ratio: ratio * 0.7 }),
-          signal
-        );
+
+        // Images have no timeline or audio to probe — just measure the still. Video/audio go
+        // through the frame/metadata extractor, and only real audio tracks get a waveform.
+        const meta =
+          kind === "image"
+            ? await loadImageMeta(url, IMAGE_DEFAULT_DURATION, signal)
+            : await loadVideoMeta(url, (ratio) => setImportProgress({ name: file.name, ratio: ratio * 0.7 }), signal);
         setImportProgress({ name: file.name, ratio: 0.75 });
-        const waveform = await extractWaveform(file, signal);
+        const waveform = kind === "image" ? { min: [], max: [] } : await extractWaveform(file, signal);
         const sourceId = crypto.randomUUID();
 
         setSources((prev) => {
-          if (prev.length === 0 && meta.width && meta.height) {
+          // Adopt the first visual source's dimensions as the project canvas size.
+          if (prev.length === 0 && kind !== "audio" && meta.width && meta.height) {
             setProjectSize({ width: meta.width, height: meta.height });
           }
           return [
             ...prev,
             {
               id: sourceId,
+              kind,
               url,
               name: file.name,
               duration: meta.duration,

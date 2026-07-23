@@ -66,7 +66,7 @@ export function TopBar({
           <i className="ri-add-line" aria-hidden="true" />
           <input
             type="file"
-            accept="video/*,audio/*"
+            accept="video/*,audio/*,image/*"
             multiple
             onChange={handleFileChange}
             hidden

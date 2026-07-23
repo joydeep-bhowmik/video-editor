@@ -169,7 +169,9 @@ export async function exportFfmpeg({
   );
   const indexById = new Map(orderedClips.map((c, i) => [c.id, i]));
 
-  // Pass 1: trim + reencode each clip to its own file (input index i == partNames[i]).
+  // Pass 1: turn each clip into its own video file (input index i == partNames[i]). Videos are
+  // trimmed to their in/out range; a still image is looped for the clip's duration into a
+  // silent video part so the rest of the graph can treat every clip uniformly.
   const partNames: string[] = [];
   for (let i = 0; i < orderedClips.length; i++) {
     const clip = orderedClips[i];
@@ -179,17 +181,32 @@ export async function exportFfmpeg({
     const partName = `part_${i}.mp4`;
     partNames.push(partName);
 
-    await ffmpeg.exec([
-      "-ss", String(clip.inPoint),
-      "-to", String(clip.outPoint),
-      "-i", srcName,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", crf,
-      "-c:a", "aac",
-      "-avoid_negative_ts", "make_zero",
-      partName,
-    ]);
+    const isImage = sourceMap.get(clip.sourceId)?.kind === "image";
+    if (isImage) {
+      await ffmpeg.exec([
+        "-loop", "1",
+        "-t", String(clipDuration(clip)),
+        "-i", srcName,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", crf,
+        "-pix_fmt", "yuv420p",
+        "-r", String(EXPORT_FPS),
+        partName,
+      ]);
+    } else {
+      await ffmpeg.exec([
+        "-ss", String(clip.inPoint),
+        "-to", String(clip.outPoint),
+        "-i", srcName,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", crf,
+        "-c:a", "aac",
+        "-avoid_negative_ts", "make_zero",
+        partName,
+      ]);
+    }
 
     onProgress({ ratio: 0.1 + 0.5 * ((i + 1) / orderedClips.length), stage: `trimmed clip ${i + 1}/${orderedClips.length}` });
   }
@@ -342,6 +359,8 @@ export async function exportFfmpeg({
         const partIndex = indexById.get(clip.id);
         if (partIndex === undefined) continue;
         if (track.muted || clip.audioMuted) continue;
+        // Image parts have no audio stream to delay/mix.
+        if (sourceMap.get(clip.sourceId)?.kind === "image") continue;
         const delayMs = Math.round(clip.start * 1000);
         const aLabel = nextLabel("a");
         filterLines.push(`[${partIndex}:a]adelay=${delayMs}|${delayMs}[${aLabel}]`);
@@ -417,9 +436,10 @@ export async function exportFfmpegAudio({
   onProgress,
   signal,
 }: ExportRequest): Promise<Uint8Array | null> {
+  const sourceKind = new Map(sources.map((s) => [s.id, s.kind]));
   const audible = clips.filter((c) => {
     const track = tracks.find((t) => t.id === c.trackId);
-    return track && !track.muted && !c.audioMuted;
+    return track && !track.muted && !c.audioMuted && sourceKind.get(c.sourceId) !== "image";
   });
   if (audible.length === 0) return null;
 

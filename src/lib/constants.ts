@@ -42,3 +42,8 @@ export const DEFAULT_PROJECT_WIDTH = 1280;
 export const DEFAULT_PROJECT_HEIGHT = 720;
 
 export const EXPORT_FPS = 30;
+
+/** Images have no intrinsic length, so a dropped image clip starts at this many seconds. */
+export const IMAGE_DEFAULT_DURATION = 5;
+/** How long a still-image clip can be stretched on the timeline. */
+export const IMAGE_MAX_DURATION = 60;

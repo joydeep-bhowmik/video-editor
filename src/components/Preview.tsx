@@ -95,6 +95,8 @@ export function Preview({
       for (const clip of activeClips) {
         const source = sourceMap.get(clip.sourceId);
         if (!source) continue;
+        // Still images have nothing to seek — they draw as-is on the redraw below.
+        if (source.kind === "image") continue;
         const video = getClipVideo(clip.id, source.url);
         video.pause();
         const sourceTime = clip.inPoint + (playhead - clip.start);
@@ -143,7 +145,9 @@ export function Preview({
       const baseClip =
         baseTrack && !baseTransitionActive ? findActiveClip(clipsNow, baseTrack.id, localTimeRef.current) : undefined;
       const baseSource = baseClip ? sourcesNow.get(baseClip.sourceId) : undefined;
-      const baseVideo = baseSource ? getClipVideo(baseClip!.id, baseSource.url) : null;
+      // An image base clip can't be a master clock (nothing plays), so it drops to the wall clock.
+      const baseVideo =
+        baseSource && baseSource.kind !== "image" ? getClipVideo(baseClip!.id, baseSource.url) : null;
 
       let time: number;
       if (baseClip && baseVideo && !baseVideo.paused && !baseVideo.seeking) {
@@ -193,8 +197,11 @@ export function Preview({
         for (const clip of trackClips) {
           const source = sourcesNow.get(clip.sourceId);
           if (!source) continue;
-          const video = getClipVideo(clip.id, source.url);
           stillActive.add(clip.id);
+          // Still images have no playback to drive — just keep them marked active so the
+          // compositor draws them; skip all the video transport below.
+          if (source.kind === "image") continue;
+          const video = getClipVideo(clip.id, source.url);
           const isBase = track.id === baseTrackId;
           video.muted = track.muted || clip.audioMuted;
           const sourceTime = clip.inPoint + (time - clip.start);

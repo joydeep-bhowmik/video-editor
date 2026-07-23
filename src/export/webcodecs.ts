@@ -3,7 +3,7 @@ import { EXPORT_FPS } from "../lib/constants";
 import { drawFrame } from "../lib/compositor";
 import { findActiveClip, totalDuration } from "../lib/timeline";
 import { findTransitionAt } from "../lib/transitions";
-import { getClipVideo } from "../lib/videoPool";
+import { getClipMedia, getClipVideo, isMediaReady } from "../lib/videoPool";
 import type { Clip } from "../types";
 import type { ExportRequest } from "./index";
 import { QUALITY_PRESETS, throwIfAborted } from "./types";
@@ -73,6 +73,20 @@ export async function exportWebCodecs({
   });
   encoder.configure(encoderConfig);
 
+  // Decode every still image once before the frame loop, so they're ready to composite.
+  await Promise.all(
+    clips
+      .filter((c) => sourceMap.get(c.sourceId)?.kind === "image")
+      .map((c) => {
+        const media = getClipMedia(c.id, sourceMap.get(c.sourceId)!);
+        if (isMediaReady(media)) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          media.addEventListener("load", () => resolve(), { once: true });
+          media.addEventListener("error", () => resolve(), { once: true });
+        });
+      })
+  );
+
   const frameStep = 1 / EXPORT_FPS;
   let frameIndex = 0;
 
@@ -96,6 +110,8 @@ export async function exportWebCodecs({
       for (const clip of trackClips) {
         const source = sourceMap.get(clip.sourceId);
         if (!source) continue;
+        // Stills are preloaded once up front and drawn directly — nothing to seek.
+        if (source.kind === "image") continue;
         const video = getClipVideo(clip.id, source.url);
         const sourceTime = clip.inPoint + (t - clip.start);
         seeks.push(seekIfNeeded(video, sourceTime));

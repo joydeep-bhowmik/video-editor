@@ -17,6 +17,41 @@ const STEP_TIMEOUT_MS = 15_000;
 // duration + thumbnail + one step per filmstrip tile
 const TOTAL_STEPS = 2 + FILMSTRIP_COUNT;
 
+/** Load a still image and build the same metadata shape a video produces. */
+export async function loadImageMeta(
+  url: string,
+  duration: number,
+  signal?: AbortSignal
+): Promise<VideoMeta> {
+  throwIfAborted(signal);
+  const img = new Image();
+  img.src = url;
+  await withTimeout(
+    new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("failed to load image"));
+    }),
+    "timed out loading image"
+  );
+  throwIfAborted(signal);
+
+  const width = img.naturalWidth;
+  const height = img.naturalHeight;
+
+  // A downscaled thumbnail; the filmstrip is that same still repeated across the tiles.
+  const canvas = document.createElement("canvas");
+  canvas.width = THUMB_WIDTH;
+  canvas.height = THUMB_HEIGHT;
+  const ctx = canvas.getContext("2d");
+  let thumbnail = "";
+  if (ctx) {
+    ctx.drawImage(img, 0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+    thumbnail = canvas.toDataURL("image/jpeg", 0.6);
+  }
+
+  return { duration, thumbnail, filmstrip: thumbnail ? [thumbnail] : [], width, height };
+}
+
 function captureFrame(video: HTMLVideoElement, width: number, height: number): string {
   if (video.videoWidth === 0 || video.videoHeight === 0) {
     // Audio-only file loaded into a <video> element — no visual frame to grab.

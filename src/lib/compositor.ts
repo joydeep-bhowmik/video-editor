@@ -2,7 +2,7 @@ import { renderEffects, shadowFor } from "./effects";
 import { resolveTransform } from "./keyframes";
 import { findActiveClip } from "./timeline";
 import { findTransitionAt, drawTransitionFrame } from "./transitions";
-import { getClipVideo } from "./videoPool";
+import { getClipMedia, isMediaReady, type ClipMedia } from "./videoPool";
 import type { Clip, SourceVideo, Track, Transform, Transition } from "../types";
 
 /** "contain" fit: largest box of srcW:srcH aspect that fits inside boxW x boxH. */
@@ -170,9 +170,9 @@ export function drawClip(
   ctx.restore();
 }
 
-/** Run a clip's effect stack, falling back to the raw video when it has none. */
-function imageForClip(clip: Clip, video: HTMLVideoElement): CanvasImageSource {
-  return renderEffects(video, clip.effects, clip.id) ?? video;
+/** Run a clip's effect stack, falling back to the raw media when it has none. */
+function imageForClip(clip: Clip, media: ClipMedia): CanvasImageSource {
+  return renderEffects(media, clip.effects, clip.id) ?? media;
 }
 
 /**
@@ -201,16 +201,16 @@ export function drawFrame(
       const sourceA = clipA && sources.get(clipA.sourceId);
       const sourceB = clipB && sources.get(clipB.sourceId);
       if (clipA && clipB && sourceA && sourceB) {
-        const videoA = getClipVideo(clipA.id, sourceA.url);
-        const videoB = getClipVideo(clipB.id, sourceB.url);
-        if (videoA.readyState >= 2 && videoB.readyState >= 2) {
+        const mediaA = getClipMedia(clipA.id, sourceA);
+        const mediaB = getClipMedia(clipB.id, sourceB);
+        if (isMediaReady(mediaA) && isMediaReady(mediaB)) {
           // Effects have to be baked before the blend, otherwise the outgoing and incoming
           // clips would share one effect pass and cross-contaminate.
           drawTransitionFrame(active.transition.kind, {
             ctx,
-            imageA: imageForClip(clipA, videoA),
+            imageA: imageForClip(clipA, mediaA),
             transformA: resolveTransform(clipA, time - clipA.start),
-            imageB: imageForClip(clipB, videoB),
+            imageB: imageForClip(clipB, mediaB),
             transformB: resolveTransform(clipB, time - clipB.start),
             progress: active.progress,
             canvasW,
@@ -225,9 +225,9 @@ export function drawFrame(
     if (!clip) continue;
     const source = sources.get(clip.sourceId);
     if (!source) continue;
-    const video = getClipVideo(clip.id, source.url);
-    if (video.readyState < 2) continue;
+    const media = getClipMedia(clip.id, source);
+    if (!isMediaReady(media)) continue;
     const transform = resolveTransform(clip, time - clip.start);
-    drawClip(ctx, imageForClip(clip, video), transform, canvasW, canvasH, shadowFor(clip.effects));
+    drawClip(ctx, imageForClip(clip, media), transform, canvasW, canvasH, shadowFor(clip.effects));
   }
 }

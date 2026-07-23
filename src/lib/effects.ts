@@ -292,13 +292,13 @@ function applyGrain(ctx: CanvasRenderingContext2D, w: number, h: number, intensi
  * Returns null when there's nothing to do, so the compositor can draw the video directly.
  */
 export function renderEffects(
-  video: HTMLVideoElement,
+  media: HTMLVideoElement | HTMLImageElement,
   effects: Effect[],
   cacheKey: string
 ): HTMLCanvasElement | null {
   if (effects.length === 0) return null;
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
+  const vw = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
+  const vh = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
   if (!vw || !vh) return null;
 
   const scale = Math.min(1, MAX_WORK_WIDTH / vw);
@@ -327,12 +327,12 @@ export function renderEffects(
     const ph = Math.max(1, Math.round((blocks * h) / w));
     const tmp = getSecondary();
     sizeTo(tmp, pw, ph);
-    tmp.ctx.drawImage(video, 0, 0, pw, ph);
+    tmp.ctx.drawImage(media, 0, 0, pw, ph);
     src.ctx.imageSmoothingEnabled = false;
     src.ctx.drawImage(tmp.canvas, 0, 0, w, h);
     src.ctx.imageSmoothingEnabled = true;
   } else {
-    src.ctx.drawImage(video, 0, 0, w, h);
+    src.ctx.drawImage(media, 0, 0, w, h);
   }
   src.ctx.filter = "none";
 
