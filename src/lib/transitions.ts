@@ -2,64 +2,79 @@ import { drawClip } from "./compositor";
 import { clipDuration } from "./timeline";
 import type { Clip, Transform, Transition, TransitionKind } from "../types";
 
-export const TRANSITION_CATALOG: { category: string; items: { kind: TransitionKind; label: string }[] }[] = [
+export const TRANSITION_CATALOG: {
+  category: string;
+  icon: string;
+  items: { kind: TransitionKind; label: string; icon: string }[];
+}[] = [
   {
     category: "Fade",
+    icon: "ri-contrast-2-line",
     items: [
-      { kind: "fade-cross", label: "Cross Dissolve" },
-      { kind: "fade-black", label: "Fade to Black" },
-      { kind: "fade-white", label: "Fade to White" },
+      { kind: "fade-cross", label: "Cross Dissolve", icon: "ri-contrast-2-line" },
+      { kind: "fade-black", label: "Fade to Black", icon: "ri-moon-clear-line" },
+      { kind: "fade-white", label: "Fade to White", icon: "ri-sun-line" },
     ],
   },
   {
     category: "Slide",
+    icon: "ri-drag-move-2-line",
     items: [
-      { kind: "slide-left", label: "Left" },
-      { kind: "slide-right", label: "Right" },
-      { kind: "slide-up", label: "Up" },
-      { kind: "slide-down", label: "Down" },
+      { kind: "slide-left", label: "Left", icon: "ri-arrow-left-line" },
+      { kind: "slide-right", label: "Right", icon: "ri-arrow-right-line" },
+      { kind: "slide-up", label: "Up", icon: "ri-arrow-up-line" },
+      { kind: "slide-down", label: "Down", icon: "ri-arrow-down-line" },
     ],
   },
   {
     category: "Push",
+    icon: "ri-arrow-left-right-line",
     items: [
-      { kind: "push-left", label: "Left" },
-      { kind: "push-right", label: "Right" },
-      { kind: "push-up", label: "Up" },
-      { kind: "push-down", label: "Down" },
+      { kind: "push-left", label: "Left", icon: "ri-arrow-left-double-line" },
+      { kind: "push-right", label: "Right", icon: "ri-arrow-right-double-line" },
+      { kind: "push-up", label: "Up", icon: "ri-arrow-up-double-line" },
+      { kind: "push-down", label: "Down", icon: "ri-arrow-down-double-line" },
     ],
   },
   {
     category: "Wipe",
+    icon: "ri-brush-line",
     items: [
-      { kind: "wipe-left", label: "Left" },
-      { kind: "wipe-right", label: "Right" },
-      { kind: "wipe-clock", label: "Clock" },
-      { kind: "wipe-circle", label: "Circle" },
+      { kind: "wipe-left", label: "Left", icon: "ri-arrow-left-line" },
+      { kind: "wipe-right", label: "Right", icon: "ri-arrow-right-line" },
+      { kind: "wipe-clock", label: "Clock", icon: "ri-time-line" },
+      { kind: "wipe-circle", label: "Circle", icon: "ri-record-circle-line" },
     ],
   },
   {
     category: "Zoom",
+    icon: "ri-zoom-in-line",
     items: [
-      { kind: "zoom-in", label: "Zoom In" },
-      { kind: "zoom-out", label: "Zoom Out" },
+      { kind: "zoom-in", label: "Zoom In", icon: "ri-zoom-in-line" },
+      { kind: "zoom-out", label: "Zoom Out", icon: "ri-zoom-out-line" },
     ],
   },
   {
     category: "Blur",
+    icon: "ri-blur-off-line",
     items: [
-      { kind: "blur", label: "Blur" },
-      { kind: "blur-motion", label: "Motion Blur" },
+      { kind: "blur", label: "Blur", icon: "ri-blur-off-line" },
+      { kind: "blur-motion", label: "Motion Blur", icon: "ri-speed-line" },
     ],
   },
   {
     category: "Iris",
+    icon: "ri-focus-3-line",
     items: [
-      { kind: "iris-circle", label: "Circle" },
-      { kind: "iris-square", label: "Square" },
+      { kind: "iris-circle", label: "Circle", icon: "ri-circle-line" },
+      { kind: "iris-square", label: "Square", icon: "ri-square-line" },
     ],
   },
 ];
+
+export const TRANSITION_BY_KIND = new Map(
+  TRANSITION_CATALOG.flatMap((cat) => cat.items.map((item) => [item.kind, item]))
+);
 
 export const DEFAULT_TRANSITION_DURATION = 0.5;
 

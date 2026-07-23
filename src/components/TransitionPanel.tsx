@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_TRANSITION_DURATION, TRANSITION_CATALOG } from "../lib/transitions";
+import { DEFAULT_TRANSITION_DURATION, TRANSITION_BY_KIND, TRANSITION_CATALOG } from "../lib/transitions";
 import type { Transition, TransitionKind } from "../types";
 
 export interface TransitionSlot {
@@ -36,7 +36,6 @@ export function TransitionPanel({
   onDurationChange,
   onWindowChange,
 }: TransitionPanelProps) {
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [durationInput, setDurationInput] = useState(String(transition?.duration ?? DEFAULT_TRANSITION_DURATION));
   const [inInput, setInInput] = useState(windowRange ? fmt(windowRange.start) : "");
   const [outInput, setOutInput] = useState(windowRange ? fmt(windowRange.end) : "");
@@ -74,93 +73,109 @@ export function TransitionPanel({
     };
   }
 
+  if (!slot) {
+    return (
+      <div className="panel-empty">
+        Put two clips side by side on a track, then tap the{" "}
+        <i className="ri-contrast-2-line" aria-hidden="true" /> badge where they meet to blend
+        them.
+      </div>
+    );
+  }
+
+  const activeDef = transition ? TRANSITION_BY_KIND.get(transition.kind) : undefined;
+
   return (
-    <div className="transition-panel">
-      {!slot && (
-        <div className="panel-empty">
-          Put two clips side by side on a track, then tap the{" "}
-          <i className="ri-contrast-2-line" aria-hidden="true" /> badge where they meet to blend
-          them.
+    <div className="effects-body">
+      {transition && windowRange && (
+        <div className="effect-applied">
+          <div className="effect-card">
+            <div className="effect-card-head">
+              <i className={activeDef?.icon ?? "ri-magic-line"} aria-hidden="true" />
+              <span className="effect-card-name">{activeDef?.label ?? transition.kind}</span>
+              <button
+                type="button"
+                className="effect-remove"
+                onClick={onRemove}
+                data-tip="Remove this transition"
+                aria-label="Remove transition"
+              >
+                <i className="ri-close-line" aria-hidden="true" />
+              </button>
+            </div>
+
+            <label className="effect-slider-row">
+              <span>In</span>
+              <input
+                type="number"
+                step="0.1"
+                className="effect-number"
+                value={inInput}
+                onChange={(e) => setInInput(e.target.value)}
+                onBlur={commitIn}
+                onKeyDown={onEnterBlur(commitIn)}
+              />
+              <span className="effect-value">s</span>
+            </label>
+            <label className="effect-slider-row">
+              <span>Out</span>
+              <input
+                type="number"
+                step="0.1"
+                className="effect-number"
+                value={outInput}
+                onChange={(e) => setOutInput(e.target.value)}
+                onBlur={commitOut}
+                onKeyDown={onEnterBlur(commitOut)}
+              />
+              <span className="effect-value">s</span>
+            </label>
+            <label className="effect-slider-row">
+              <span>Duration</span>
+              <input
+                type="number"
+                step="0.1"
+                min="0.1"
+                className="effect-number"
+                value={durationInput}
+                onChange={(e) => setDurationInput(e.target.value)}
+                onBlur={commitDuration}
+                onKeyDown={onEnterBlur(commitDuration)}
+              />
+              <span className="effect-value">s</span>
+            </label>
+          </div>
         </div>
       )}
 
-      {slot && (
-        <>
-          {transition && windowRange && (
-            <div className="transition-panel-timing">
-              <div className="transition-panel-row">
-                <label>In</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={inInput}
-                  onChange={(e) => setInInput(e.target.value)}
-                  onBlur={commitIn}
-                  onKeyDown={onEnterBlur(commitIn)}
-                />
-                <span>s</span>
-              </div>
-              <div className="transition-panel-row">
-                <label>Out</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={outInput}
-                  onChange={(e) => setOutInput(e.target.value)}
-                  onBlur={commitOut}
-                  onKeyDown={onEnterBlur(commitOut)}
-                />
-                <span>s</span>
-              </div>
-              <div className="transition-panel-row">
-                <label>Duration</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  value={durationInput}
-                  onChange={(e) => setDurationInput(e.target.value)}
-                  onBlur={commitDuration}
-                  onKeyDown={onEnterBlur(commitDuration)}
-                />
-                <span>s</span>
-                <button type="button" className="transition-remove" onClick={onRemove}>
-                  Remove
-                </button>
-              </div>
-            </div>
-          )}
-          {!transition && <div className="transition-panel-hint">Pick a transition for this boundary:</div>}
+      <div className="effect-picker-title">{transition ? "Change transition" : "Add a transition"}</div>
 
-          <div className="transition-catalog">
-            {TRANSITION_CATALOG.map((cat) => (
-              <div key={cat.category} className="transition-category">
-                <button
-                  type="button"
-                  className="transition-category-toggle"
-                  onClick={() => setExpandedCategory((c) => (c === cat.category ? null : cat.category))}
-                >
-                  {cat.category}
-                </button>
-                {expandedCategory === cat.category && (
-                  <div className="transition-items">
-                    {cat.items.map((item) => (
-                      <button
-                        type="button"
-                        key={item.kind}
-                        className={"transition-item" + (transition?.kind === item.kind ? " selected" : "")}
-                        onClick={() => onApply(item.kind)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+      {TRANSITION_CATALOG.map((cat) => (
+        <div className="transition-category" key={cat.category}>
+          <div className="transition-category-title">
+            <i className={cat.icon} aria-hidden="true" />
+            <span>{cat.category}</span>
+          </div>
+          <div className="effect-grid">
+            {cat.items.map((item) => (
+              <button
+                type="button"
+                key={item.kind}
+                className={"effect-tile" + (transition?.kind === item.kind ? " is-applied" : "")}
+                onClick={() => onApply(item.kind)}
+                data-tip={
+                  transition?.kind === item.kind
+                    ? `${item.label} is applied here`
+                    : `${cat.category} — ${item.label}`
+                }
+              >
+                <i className={item.icon} aria-hidden="true" />
+                <span>{item.label}</span>
+              </button>
             ))}
           </div>
-        </>
-      )}
+        </div>
+      ))}
     </div>
   );
 }
