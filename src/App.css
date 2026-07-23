@@ -1010,6 +1010,8 @@
   max-height: 100%;
   margin: auto;
   overflow: hidden;
+  outline: 1px solid rgba(255, 255, 255, 0.16);
+  outline-offset: -1px;
 }
 
 .preview-canvas-wrap canvas {
