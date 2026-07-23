@@ -45,6 +45,141 @@ const SKEW: FieldSpec[] = [
   { key: "skewY", label: "Y", min: -60, max: 60, unit: "°", toDisplay: 1 },
 ];
 
+interface FieldProps {
+  spec: FieldSpec;
+  clip: Clip;
+  t: Transform;
+  localTime: number;
+  onChange: (t: Transform) => void;
+  onSetKeyframe: (prop: AnimatableProp, value: number) => void;
+  onToggleKeyframe: (prop: AnimatableProp) => void;
+  onBeginEdit: () => void;
+  onEndEdit: () => void;
+}
+
+// Module-level (not defined inside TransformPanel's render): if this were redeclared on every
+// parent render, React would see a new component type each time and remount the <input> mid-drag,
+// wiping the rAF-throttle state below and detaching the browser's native pointer capture — which
+// is exactly what made the slider feel laggy and land on the wrong value.
+function Field({ spec, clip, t, localTime, onChange, onSetKeyframe, onToggleKeyframe, onBeginEdit, onEndEdit }: FieldProps) {
+  const isAnimated = propHasKeyframes(clip, spec.key);
+  const value = valueAt(clip, spec.key, localTime);
+  const kfHere = !!keyframeAt(clip, spec.key, localTime);
+
+  // Dragging fires far more native `input` events than the app can usefully re-render/redraw
+  // for — queuing a full state update (and canvas redraw) on every one backs up the event loop
+  // and the slider feels laggy. Track the drag's live value locally for instant visual feedback,
+  // and coalesce the actual onChange to at most once per animation frame.
+  const [liveShown, setLiveShown] = useState<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const latestRaw = useRef(0);
+  const shown = liveShown ?? Math.round(value * spec.toDisplay);
+
+  // While a prop is animated, edits write a keyframe at the playhead; otherwise they set the
+  // static base value (the pre-animation behaviour).
+  const setRaw = (raw: number, discrete: boolean) => {
+    if (isAnimated) {
+      if (discrete) onBeginEdit();
+      onSetKeyframe(spec.key, raw);
+      if (discrete) onEndEdit();
+    } else if (discrete) {
+      onBeginEdit();
+      onChange({ ...t, [spec.key]: raw });
+      onEndEdit();
+    } else {
+      onChange({ ...t, [spec.key]: raw });
+    }
+  };
+
+  const onSlide = (raw: number, displayValue: number) => {
+    latestRaw.current = raw;
+    setLiveShown(displayValue);
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setRaw(latestRaw.current, false);
+    });
+  };
+
+  const flushSlide = () => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      setRaw(latestRaw.current, false);
+    }
+    setLiveShown(null);
+    onEndEdit();
+  };
+
+  return (
+    <label className={"xform-field" + (isAnimated ? " is-animated" : "")}>
+      <button
+        type="button"
+        className={"kf-toggle" + (kfHere ? " is-here" : isAnimated ? " is-animated" : "")}
+        onClick={() => onToggleKeyframe(spec.key)}
+        data-tip={
+          kfHere
+            ? "Remove keyframe here"
+            : isAnimated
+              ? "Add a keyframe at the playhead"
+              : "Animate this — adds the first keyframe"
+        }
+        aria-label="Toggle keyframe"
+      >
+        <span className="kf-diamond" />
+      </button>
+      <span className="xform-field-label">{spec.label}</span>
+      <input
+        type="range"
+        min={spec.min}
+        max={spec.max}
+        value={shown}
+        onPointerDown={onBeginEdit}
+        onPointerUp={flushSlide}
+        onChange={(e) => onSlide(Number(e.target.value) / spec.toDisplay, Number(e.target.value))}
+      />
+      <input
+        type="number"
+        className="xform-num"
+        value={shown}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (!Number.isNaN(v)) setRaw(v / spec.toDisplay, true);
+        }}
+      />
+      <span className="xform-unit">{spec.unit}</span>
+    </label>
+  );
+}
+
+interface SectionProps {
+  icon: string;
+  title: string;
+  fields: FieldSpec[];
+  clip: Clip;
+  t: Transform;
+  localTime: number;
+  onChange: (t: Transform) => void;
+  onSetKeyframe: (prop: AnimatableProp, value: number) => void;
+  onToggleKeyframe: (prop: AnimatableProp) => void;
+  onBeginEdit: () => void;
+  onEndEdit: () => void;
+}
+
+function Section({ icon, title, fields, ...fieldProps }: SectionProps) {
+  return (
+    <div className="xform-section">
+      <div className="transition-category-title">
+        <i className={icon} aria-hidden="true" />
+        <span>{title}</span>
+      </div>
+      {fields.map((f) => (
+        <Field spec={f} key={f.key} {...fieldProps} />
+      ))}
+    </div>
+  );
+}
+
 export function TransformPanel({
   clip,
   playhead,
@@ -75,108 +210,7 @@ export function TransformPanel({
     onEndEdit();
   }
 
-  function Field({ spec }: { spec: FieldSpec }) {
-    const isAnimated = propHasKeyframes(clip!, spec.key);
-    const value = valueAt(clip!, spec.key, localTime);
-    const kfHere = !!keyframeAt(clip!, spec.key, localTime);
-
-    // Dragging fires far more native `input` events than the app can usefully re-render/redraw
-    // for — queuing a full state update (and canvas redraw) on every one backs up the event loop
-    // and the slider feels laggy. Track the drag's live value locally for instant visual feedback,
-    // and coalesce the actual onChange to at most once per animation frame.
-    const [liveShown, setLiveShown] = useState<number | null>(null);
-    const rafRef = useRef<number | null>(null);
-    const latestRaw = useRef(0);
-    const shown = liveShown ?? Math.round(value * spec.toDisplay);
-
-    // While a prop is animated, edits write a keyframe at the playhead; otherwise they set the
-    // static base value (the pre-animation behaviour).
-    const setRaw = (raw: number, discrete: boolean) => {
-      if (isAnimated) {
-        if (discrete) onBeginEdit();
-        onSetKeyframe(spec.key, raw);
-        if (discrete) onEndEdit();
-      } else if (discrete) {
-        commit({ [spec.key]: raw } as Partial<Transform>);
-      } else {
-        onChange({ ...t, [spec.key]: raw });
-      }
-    };
-
-    const onSlide = (raw: number, displayValue: number) => {
-      latestRaw.current = raw;
-      setLiveShown(displayValue);
-      if (rafRef.current !== null) return;
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = null;
-        setRaw(latestRaw.current, false);
-      });
-    };
-
-    const flushSlide = () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-        setRaw(latestRaw.current, false);
-      }
-      setLiveShown(null);
-      onEndEdit();
-    };
-
-    return (
-      <label className={"xform-field" + (isAnimated ? " is-animated" : "")}>
-        <button
-          type="button"
-          className={"kf-toggle" + (kfHere ? " is-here" : isAnimated ? " is-animated" : "")}
-          onClick={() => onToggleKeyframe(spec.key)}
-          data-tip={
-            kfHere
-              ? "Remove keyframe here"
-              : isAnimated
-                ? "Add a keyframe at the playhead"
-                : "Animate this — adds the first keyframe"
-          }
-          aria-label="Toggle keyframe"
-        >
-          <span className="kf-diamond" />
-        </button>
-        <span className="xform-field-label">{spec.label}</span>
-        <input
-          type="range"
-          min={spec.min}
-          max={spec.max}
-          value={shown}
-          onPointerDown={onBeginEdit}
-          onPointerUp={flushSlide}
-          onChange={(e) => onSlide(Number(e.target.value) / spec.toDisplay, Number(e.target.value))}
-        />
-        <input
-          type="number"
-          className="xform-num"
-          value={shown}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (!Number.isNaN(v)) setRaw(v / spec.toDisplay, true);
-          }}
-        />
-        <span className="xform-unit">{spec.unit}</span>
-      </label>
-    );
-  }
-
-  function Section({ icon, title, fields }: { icon: string; title: string; fields: FieldSpec[] }) {
-    return (
-      <div className="xform-section">
-        <div className="transition-category-title">
-          <i className={icon} aria-hidden="true" />
-          <span>{title}</span>
-        </div>
-        {fields.map((f) => (
-          <Field spec={f} key={f.key} />
-        ))}
-      </div>
-    );
-  }
+  const fieldProps = { clip, t, localTime, onChange, onSetKeyframe, onToggleKeyframe, onBeginEdit, onEndEdit };
 
   return (
     <div className="effects-body xform-body">
@@ -220,28 +254,28 @@ export function TransformPanel({
         </div>
       )}
 
-      <Section icon="ri-drag-move-2-line" title="Position" fields={POSITION} />
+      <Section icon="ri-drag-move-2-line" title="Position" fields={POSITION} {...fieldProps} />
 
       <div className="xform-section">
         <div className="transition-category-title">
           <i className="ri-aspect-ratio-line" aria-hidden="true" />
           <span>Scale &amp; Rotation</span>
         </div>
-        <Field spec={{ key: "scale", label: "Scale", min: 1, max: 300, unit: "%", toDisplay: 100 }} />
-        <Field spec={{ key: "rotation", label: "Rotate", min: -180, max: 180, unit: "°", toDisplay: 1 }} />
+        <Field spec={{ key: "scale", label: "Scale", min: 1, max: 300, unit: "%", toDisplay: 100 }} {...fieldProps} />
+        <Field spec={{ key: "rotation", label: "Rotate", min: -180, max: 180, unit: "°", toDisplay: 1 }} {...fieldProps} />
       </div>
 
-      <Section icon="ri-focus-3-line" title="Anchor Point" fields={ANCHOR} />
+      <Section icon="ri-focus-3-line" title="Anchor Point" fields={ANCHOR} {...fieldProps} />
 
       <div className="xform-section">
         <div className="transition-category-title">
           <i className="ri-contrast-drop-line" aria-hidden="true" />
           <span>Opacity</span>
         </div>
-        <Field spec={{ key: "opacity", label: "Opacity", min: 0, max: 100, unit: "%", toDisplay: 100 }} />
+        <Field spec={{ key: "opacity", label: "Opacity", min: 0, max: 100, unit: "%", toDisplay: 100 }} {...fieldProps} />
       </div>
 
-      <Section icon="ri-crop-line" title="Crop" fields={CROP} />
+      <Section icon="ri-crop-line" title="Crop" fields={CROP} {...fieldProps} />
 
       <div className="xform-section">
         <div className="transition-category-title">
@@ -266,14 +300,14 @@ export function TransformPanel({
         </div>
       </div>
 
-      <Section icon="ri-shape-line" title="Skew" fields={SKEW} />
+      <Section icon="ri-shape-line" title="Skew" fields={SKEW} {...fieldProps} />
 
       <div className="xform-section">
         <div className="transition-category-title">
           <i className="ri-box-3-line" aria-hidden="true" />
           <span>Perspective</span>
         </div>
-        <Field spec={{ key: "perspective", label: "Tilt", min: -100, max: 100, unit: "", toDisplay: 100 }} />
+        <Field spec={{ key: "perspective", label: "Tilt", min: -100, max: 100, unit: "", toDisplay: 100 }} {...fieldProps} />
       </div>
 
       <button
