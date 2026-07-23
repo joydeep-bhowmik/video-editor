@@ -405,3 +405,86 @@ export async function exportFfmpeg({
     signal?.removeEventListener("abort", onAbort);
   }
 }
+
+/**
+ * Mix just the timeline's audio into one AAC file (returns null when nothing is audible). Used
+ * to give the WebCodecs video path — which can't produce audio — a soundtrack to mux back in.
+ */
+export async function exportFfmpegAudio({
+  sources,
+  tracks,
+  clips,
+  onProgress,
+  signal,
+}: ExportRequest): Promise<Uint8Array | null> {
+  const audible = clips.filter((c) => {
+    const track = tracks.find((t) => t.id === c.trackId);
+    return track && !track.muted && !c.audioMuted;
+  });
+  if (audible.length === 0) return null;
+
+  const ffmpeg = await getFFmpeg();
+  throwIfAborted(signal);
+  onProgress({ ratio: 0, stage: "mixing audio" });
+
+  const written = new Map<string, string>();
+  for (const source of sources) {
+    const name = `aud_${source.id}${extensionFor(source.file.name)}`;
+    written.set(source.id, name);
+    await ffmpeg.writeFile(name, await fetchFile(source.file));
+  }
+
+  // Trim each audible clip's audio to its own file, then delay+mix onto the timeline.
+  const parts: string[] = [];
+  for (let i = 0; i < audible.length; i++) {
+    const clip = audible[i];
+    const src = written.get(clip.sourceId);
+    if (!src) continue;
+    throwIfAborted(signal);
+    const part = `apart_${i}.m4a`;
+    await ffmpeg.exec(["-ss", String(clip.inPoint), "-to", String(clip.outPoint), "-i", src, "-vn", "-c:a", "aac", part]);
+    parts.push(part);
+  }
+  if (parts.length === 0) return null;
+
+  const filter = audible
+    .map((clip, i) => {
+      const delayMs = Math.round(clip.start * 1000);
+      return `[${i}:a]adelay=${delayMs}|${delayMs}[d${i}]`;
+    })
+    .join(";");
+  const mix =
+    parts.length === 1
+      ? `${filter};[d0]anull[aout]`
+      : `${filter};${audible.map((_, i) => `[d${i}]`).join("")}amix=inputs=${parts.length}:duration=longest:normalize=0[aout]`;
+
+  await ffmpeg.exec([
+    ...parts.flatMap((p) => ["-i", p]),
+    "-filter_complex", mix,
+    "-map", "[aout]",
+    "-c:a", "aac",
+    "audio_only.m4a",
+  ]);
+  throwIfAborted(signal);
+  const data = (await ffmpeg.readFile("audio_only.m4a")) as Uint8Array;
+  return data.slice();
+}
+
+/** Combine a (silent) video blob with an AAC audio track without re-encoding the video. */
+export async function muxVideoAudio(video: Blob, audio: Uint8Array): Promise<Blob> {
+  const ffmpeg = await getFFmpeg();
+  await ffmpeg.writeFile("mux_v.mp4", new Uint8Array(await video.arrayBuffer()));
+  await ffmpeg.writeFile("mux_a.m4a", audio);
+  await ffmpeg.exec([
+    "-i", "mux_v.mp4",
+    "-i", "mux_a.m4a",
+    "-c:v", "copy",
+    "-c:a", "aac",
+    "-map", "0:v:0",
+    "-map", "1:a:0",
+    "-shortest",
+    "mux_out.mp4",
+  ]);
+  const data = (await ffmpeg.readFile("mux_out.mp4")) as Uint8Array;
+  return new Blob([data.slice()], { type: "video/mp4" });
+}

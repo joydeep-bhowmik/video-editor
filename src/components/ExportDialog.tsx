@@ -1,4 +1,4 @@
-import type { ExportEngine, ExportProgress, ExportQuality, ExportSettings } from "../export";
+import { webCodecsSupported, type ExportEngine, type ExportProgress, type ExportQuality, type ExportSettings } from "../export";
 
 interface ExportDialogProps {
   settings: ExportSettings;
@@ -67,9 +67,10 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const busy = progress !== null;
   const percent = progress ? Math.round(progress.ratio * 100) : 0;
-  // ffmpeg (and Auto, which resolves to it) can't render keyframe motion — warn so the user can
-  // switch to Fast when animation matters.
-  const animationWarning = hasAnimation && settings.engine !== "webcodecs";
+  // Animated projects now render their motion on every engine (the ffmpeg path borrows the
+  // canvas renderer for video and muxes audio back in). The only exception is the rare browser
+  // without WebCodecs, where the ffmpeg engine still falls back to a static frame.
+  const animationWarning = hasAnimation && settings.engine !== "webcodecs" && !webCodecsSupported();
 
   return (
     // Backdrop clicks only dismiss while idle — a render in flight shouldn't be closable by accident.
@@ -126,8 +127,8 @@ export function ExportDialog({
               <div className="export-warning">
                 <i className="ri-alert-line" aria-hidden="true" />
                 <span>
-                  This project has animated clips. This engine renders them frozen on one frame —
-                  choose <strong>Fast</strong> to keep the motion (that export has no sound).
+                  This project has animated clips, but this browser lacks WebCodecs — the motion
+                  will render frozen on one frame. Try a current Chrome or Edge.
                 </span>
               </div>
             )}
