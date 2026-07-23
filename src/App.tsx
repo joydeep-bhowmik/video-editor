@@ -13,7 +13,8 @@ import { CancelledError } from "./lib/cancel";
 import { makeEffect, type EffectExtraKey } from "./lib/effects";
 import {
   keyframeAt,
-  keyframeTimes,
+  keyframeColumns,
+  moveKeyframes,
   removeKeyframeAt,
   upsertKeyframe,
   valueAt,
@@ -288,13 +289,28 @@ export default function App() {
 
   /** Jump the playhead to the previous/next keyframe time within the given clip. */
   function handleSeekKeyframe(clip: Clip, dir: -1 | 1) {
-    const times = keyframeTimes(clip).map((t) => clip.start + t);
+    const times = keyframeColumns(clip).map((t) => clip.start + t);
     const cur = playhead;
     const target = dir < 0 ? [...times].reverse().find((t) => t < cur - 1e-4) : times.find((t) => t > cur + 1e-4);
     if (target !== undefined) {
       setIsPlaying(false);
       setPlayhead(target);
     }
+  }
+
+  /** Retime a whole keyframe column (dragged on the timeline). Continuous — one undo step. */
+  function handleMoveKeyframes(clipId: string, ids: string[], toLocalTime: number) {
+    updateLive((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => (c.id === clipId ? { ...c, keyframes: moveKeyframes(c.keyframes, ids, toLocalTime) } : c)),
+    }));
+  }
+
+  function handleClearKeyframes(clipId: string) {
+    commitEdit((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => (c.id === clipId ? { ...c, keyframes: [] } : c)),
+    }));
   }
 
   function handleTrimClip(id: string, inPoint: number, outPoint: number) {
@@ -742,6 +758,7 @@ export default function App() {
             onDeleteTrack={handleDeleteTrack}
             onToggleTrackMute={handleToggleTrackMute}
             onSelectTransitionSlot={handleSelectTransitionSlot}
+            onMoveKeyframes={handleMoveKeyframes}
             onBeginEdit={beginLiveEdit}
             onEndEdit={endLiveEdit}
           />
@@ -759,6 +776,7 @@ export default function App() {
               onSetKeyframe={(prop, v) => selectedClipId && handleSetKeyframe(selectedClipId, prop, v)}
               onToggleKeyframe={(prop) => selectedClipId && handleToggleKeyframe(selectedClipId, prop)}
               onSeekKeyframe={(dir) => selectedClip && handleSeekKeyframe(selectedClip, dir)}
+              onClearKeyframes={() => selectedClipId && handleClearKeyframes(selectedClipId)}
               onBeginEdit={beginLiveEdit}
               onEndEdit={endLiveEdit}
             />

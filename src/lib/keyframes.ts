@@ -92,11 +92,30 @@ export function resolveTransform(clip: Clip, localTime: number): Transform {
   return t;
 }
 
-/** Sorted, de-duplicated clip-local times that have at least one keyframe on any prop. */
-export function keyframeTimes(clip: Clip): number[] {
-  const times = new Set<number>();
-  for (const k of clip.keyframes) times.add(Math.round(k.time / KEYFRAME_EPSILON) * KEYFRAME_EPSILON);
-  return [...times].sort((a, b) => a - b);
+/**
+ * Distinct keyframe "columns" — clip-local times where one or more properties have a keyframe.
+ * Returns the exact time of the first keyframe in each cluster (not a rounded bucket), so seeking
+ * to a column lands the playhead precisely on real keyframes.
+ */
+export function keyframeColumns(clip: Clip): number[] {
+  const times = clip.keyframes.map((k) => k.time).sort((a, b) => a - b);
+  const cols: number[] = [];
+  for (const t of times) {
+    if (cols.length && t - cols[cols.length - 1] <= KEYFRAME_EPSILON) continue;
+    cols.push(t);
+  }
+  return cols;
+}
+
+/** IDs of every keyframe (across all props) at approximately `time` — one draggable column. */
+export function keyframeIdsAt(clip: Clip, time: number): string[] {
+  return clip.keyframes.filter((k) => Math.abs(k.time - time) <= KEYFRAME_EPSILON).map((k) => k.id);
+}
+
+/** Move the given keyframes to a new clip-local time (used when dragging a column on the timeline). */
+export function moveKeyframes(keyframes: Keyframe[], ids: string[], toTime: number): Keyframe[] {
+  const set = new Set(ids);
+  return keyframes.map((k) => (set.has(k.id) ? { ...k, time: toTime } : k));
 }
 
 // --- pure mutations (return a new keyframes array) --------------------------

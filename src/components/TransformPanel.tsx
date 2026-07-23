@@ -10,6 +10,7 @@ interface TransformPanelProps {
   onSetKeyframe: (prop: AnimatableProp, value: number) => void;
   onToggleKeyframe: (prop: AnimatableProp) => void;
   onSeekKeyframe: (dir: -1 | 1) => void;
+  onClearKeyframes: () => void;
   onBeginEdit: () => void;
   onEndEdit: () => void;
 }
@@ -50,6 +51,7 @@ export function TransformPanel({
   onSetKeyframe,
   onToggleKeyframe,
   onSeekKeyframe,
+  onClearKeyframes,
   onBeginEdit,
   onEndEdit,
 }: TransformPanelProps) {
@@ -93,12 +95,18 @@ export function TransformPanel({
     };
 
     return (
-      <label className="xform-field">
+      <label className={"xform-field" + (isAnimated ? " is-animated" : "")}>
         <button
           type="button"
           className={"kf-toggle" + (kfHere ? " is-here" : isAnimated ? " is-animated" : "")}
           onClick={() => onToggleKeyframe(spec.key)}
-          data-tip={kfHere ? "Remove keyframe here" : "Add keyframe at the playhead"}
+          data-tip={
+            kfHere
+              ? "Remove keyframe here"
+              : isAnimated
+                ? "Add a keyframe at the playhead"
+                : "Animate this — adds the first keyframe"
+          }
           aria-label="Toggle keyframe"
         >
           <span className="kf-diamond" />
@@ -143,7 +151,7 @@ export function TransformPanel({
 
   return (
     <div className="effects-body xform-body">
-      {animated && (
+      {animated ? (
         <div className="kf-bar">
           <button
             type="button"
@@ -155,7 +163,7 @@ export function TransformPanel({
             <i className="ri-skip-back-mini-line" aria-hidden="true" />
           </button>
           <span className="kf-bar-label">
-            <span className="kf-diamond is-here" /> Animating · {localTime.toFixed(2)}s
+            <span className="kf-diamond is-here" /> {localTime.toFixed(2)}s
           </span>
           <button
             type="button"
@@ -166,6 +174,20 @@ export function TransformPanel({
           >
             <i className="ri-skip-forward-mini-line" aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className="kf-clear"
+            onClick={onClearKeyframes}
+            data-tip="Remove all keyframes"
+            aria-label="Clear animation"
+          >
+            <i className="ri-delete-bin-line" aria-hidden="true" />
+          </button>
+        </div>
+      ) : (
+        <div className="kf-hint">
+          <span className="kf-diamond" /> Tap a <strong>◆</strong> to start animating: set a value,
+          move the playhead, change it again.
         </div>
       )}
 

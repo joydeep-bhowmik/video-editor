@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MIN_CLIP_DURATION, PX_PER_SEC, TRACK_HEIGHT } from "../lib/constants";
 import { clipDuration, planInsert, totalDuration, type InsertPlan } from "../lib/timeline";
+import { keyframeColumns, keyframeIdsAt } from "../lib/keyframes";
 import { sliceWaveform } from "../lib/waveform";
 import { TransitionBadge } from "./TransitionBadge";
 import type { TransitionSlot } from "./TransitionPanel";
@@ -38,6 +39,7 @@ interface TimelineProps {
   onDeleteTrack: (trackId: string) => void;
   onToggleTrackMute: (trackId: string) => void;
   onSelectTransitionSlot: (slot: TransitionSlot) => void;
+  onMoveKeyframes: (clipId: string, ids: string[], toLocalTime: number) => void;
   onBeginEdit: () => void;
   onEndEdit: () => void;
 }
@@ -56,6 +58,17 @@ type Drag =
       targetTrackId: string;
       dropTime: number;
       plan: InsertPlan;
+    }
+  | {
+      kind: "keyframe";
+      clipId: string;
+      ids: string[];
+      startX: number;
+      startLocal: number;
+      maxLocal: number;
+      toLocal: number;
+      started: boolean;
+      moved: boolean;
     }
   | { kind: "scrub" };
 
@@ -85,6 +98,7 @@ export function Timeline({
   onDeleteTrack,
   onToggleTrackMute,
   onSelectTransitionSlot,
+  onMoveKeyframes,
   onBeginEdit,
   onEndEdit,
 }: TimelineProps) {
@@ -196,6 +210,23 @@ export function Timeline({
     };
   }
 
+  function handleKeyframePointerDown(e: React.PointerEvent, clip: Clip, localTime: number) {
+    e.stopPropagation();
+    onSelectClip(clip.id);
+    dragRef.current = {
+      kind: "keyframe",
+      clipId: clip.id,
+      ids: keyframeIdsAt(clip, localTime),
+      startX: e.clientX,
+      startLocal: localTime,
+      maxLocal: clipDuration(clip),
+      toLocal: localTime,
+      started: false,
+      moved: false,
+    };
+    forceRender((n) => n + 1);
+  }
+
   function handleDrop(e: React.DragEvent, trackId: string) {
     e.preventDefault();
     setDropPreview(null);
@@ -242,6 +273,23 @@ export function Timeline({
       const clip = clips.find((c) => c.id === drag.clipId);
       if (!clip) return;
 
+      if (drag.kind === "keyframe") {
+        const dxSec = (e.clientX - drag.startX) / pxPerSec;
+        if (!drag.moved && Math.abs(e.clientX - drag.startX) > 3) drag.moved = true;
+        if (drag.moved) {
+          // Defer the history snapshot to the first real move, so a plain click (seek) doesn't
+          // push a no-op undo step.
+          if (!drag.started) {
+            onBeginEdit();
+            drag.started = true;
+          }
+          drag.toLocal = Math.max(0, Math.min(drag.maxLocal, drag.startLocal + dxSec));
+          onMoveKeyframes(drag.clipId, drag.ids, drag.toLocal);
+          forceRender((n) => n + 1);
+        }
+        return;
+      }
+
       if (drag.kind === "move") {
         const deltaX = e.clientX - drag.startX;
         const targetTrackId = trackIdAtY(e.clientY, clip.trackId);
@@ -279,6 +327,14 @@ export function Timeline({
       if (drag?.kind === "trim") onEndEdit();
       if (drag?.kind === "move" && drag.deltaX !== 0) {
         onReorderClip(drag.clipId, drag.targetTrackId, drag.dropTime);
+      }
+      if (drag?.kind === "keyframe") {
+        if (drag.started) onEndEdit();
+        // A click that didn't drag just seeks the playhead exactly onto the keyframe.
+        else {
+          const clip = clips.find((c) => c.id === drag.clipId);
+          if (clip) onSeek(clip.start + drag.startLocal);
+        }
       }
       dragRef.current = null;
       forceRender((n) => n + 1);
@@ -490,6 +546,25 @@ export function Timeline({
                           className="trim-handle trim-handle-right"
                           onPointerDown={(e) => handleTrimPointerDown(e, clip, "out")}
                         />
+                        {clip.keyframes.length > 0 && (
+                          <div className="clip-kf-row">
+                            {keyframeColumns(clip).map((local) => {
+                              const onPlayhead = Math.abs(clip.start + local - playhead) < 0.02;
+                              return (
+                                <button
+                                  key={local}
+                                  type="button"
+                                  className={"clip-kf" + (onPlayhead ? " is-here" : "")}
+                                  style={{ left: local * pxPerSec }}
+                                  onPointerDown={(e) => handleKeyframePointerDown(e, clip, local)}
+                                  title="Keyframe — click to jump here, drag to retime"
+                                >
+                                  <span className="clip-kf-diamond" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

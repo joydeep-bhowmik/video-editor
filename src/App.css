@@ -529,6 +529,46 @@
   background: rgba(124, 92, 255, 0.2);
 }
 
+.kf-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.kf-clear:hover {
+  color: var(--danger);
+  background: rgba(255, 93, 108, 0.14);
+}
+
+.kf-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.kf-hint strong {
+  color: var(--accent);
+}
+
+/* Animated field: tint the label so it's obvious which properties move. */
+.xform-field.is-animated .xform-field-label {
+  color: var(--accent);
+}
+
 /* Diamond keyframe toggle at the head of each animatable field. */
 .kf-toggle {
   display: inline-flex;
@@ -1395,6 +1435,54 @@
   pointer-events: none;
   position: relative;
   z-index: 2;
+}
+
+/* Keyframe markers along the bottom of an animated clip. */
+.clip-kf-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.clip-kf {
+  position: absolute;
+  bottom: 1px;
+  width: 16px;
+  height: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.clip-kf-diamond {
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  border-radius: 1px;
+}
+
+.clip-kf:hover .clip-kf-diamond {
+  background: var(--accent);
+}
+
+.clip-kf.is-here .clip-kf-diamond {
+  background: var(--accent);
+  border-color: #fff;
+  box-shadow: 0 0 0 1.5px var(--accent);
 }
 
 /* Bigger hit area than the visible bar, so the handles stay grabbable by finger. */
