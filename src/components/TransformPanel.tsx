@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { DEFAULT_TRANSFORM_BASE } from "../lib/constants";
 import { clipDuration } from "../lib/timeline";
 import { keyframeAt, propHasKeyframes, valueAt, type AnimatableProp } from "../lib/keyframes";
@@ -77,8 +78,16 @@ export function TransformPanel({
   function Field({ spec }: { spec: FieldSpec }) {
     const isAnimated = propHasKeyframes(clip!, spec.key);
     const value = valueAt(clip!, spec.key, localTime);
-    const shown = Math.round(value * spec.toDisplay);
     const kfHere = !!keyframeAt(clip!, spec.key, localTime);
+
+    // Dragging fires far more native `input` events than the app can usefully re-render/redraw
+    // for — queuing a full state update (and canvas redraw) on every one backs up the event loop
+    // and the slider feels laggy. Track the drag's live value locally for instant visual feedback,
+    // and coalesce the actual onChange to at most once per animation frame.
+    const [liveShown, setLiveShown] = useState<number | null>(null);
+    const rafRef = useRef<number | null>(null);
+    const latestRaw = useRef(0);
+    const shown = liveShown ?? Math.round(value * spec.toDisplay);
 
     // While a prop is animated, edits write a keyframe at the playhead; otherwise they set the
     // static base value (the pre-animation behaviour).
@@ -92,6 +101,26 @@ export function TransformPanel({
       } else {
         onChange({ ...t, [spec.key]: raw });
       }
+    };
+
+    const onSlide = (raw: number, displayValue: number) => {
+      latestRaw.current = raw;
+      setLiveShown(displayValue);
+      if (rafRef.current !== null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        setRaw(latestRaw.current, false);
+      });
+    };
+
+    const flushSlide = () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        setRaw(latestRaw.current, false);
+      }
+      setLiveShown(null);
+      onEndEdit();
     };
 
     return (
@@ -118,8 +147,8 @@ export function TransformPanel({
           max={spec.max}
           value={shown}
           onPointerDown={onBeginEdit}
-          onPointerUp={onEndEdit}
-          onChange={(e) => setRaw(Number(e.target.value) / spec.toDisplay, false)}
+          onPointerUp={flushSlide}
+          onChange={(e) => onSlide(Number(e.target.value) / spec.toDisplay, Number(e.target.value))}
         />
         <input
           type="number"
