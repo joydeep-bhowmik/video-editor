@@ -211,26 +211,53 @@ export async function exportFfmpeg({
   ): { label: string; cxPx: number; cyPx: number } {
     const source = sourceMap.get(clip.sourceId);
     const { transform } = clip;
+
+    // Crop trims the source before fitting, so the fitted box uses the *kept* aspect ratio.
+    const keepW = Math.max(0.01, 1 - transform.cropLeft - transform.cropRight);
+    const keepH = Math.max(0.01, 1 - transform.cropTop - transform.cropBottom);
+    const cropW = source ? source.width * keepW : projectWidth;
+    const cropH = source ? source.height * keepH : projectHeight;
+
     const boxW = projectWidth * transform.scale;
     const boxH = projectHeight * transform.scale;
-    const { width: drawW, height: drawH } = source
-      ? computeContainSize(source.width, source.height, boxW, boxH)
-      : { width: boxW, height: boxH };
+    const { width: drawW, height: drawH } = computeContainSize(cropW, cropH, boxW, boxH);
     const rotRad = (transform.rotation * Math.PI) / 180;
     const label = nextLabel("v");
     const shiftPrefix = timeShift !== undefined ? `setpts=PTS+${timeShift}/TB,` : "";
+
     // Effects run before scale/rotate so they operate on the clip's own pixels, matching the
     // preview (where the effect pass happens on the raw frame, then the transform is applied).
     const fx = effectFilters(clip.effects);
     const fxPrefix = fx.length ? `${fx.join(",")},` : "";
+
+    const cropped =
+      keepW < 0.999 || keepH < 0.999
+        ? `crop=iw*${keepW.toFixed(4)}:ih*${keepH.toFixed(4)}:iw*${transform.cropLeft.toFixed(4)}:ih*${transform.cropTop.toFixed(4)},`
+        : "";
+    const flip = `${transform.flipH ? "hflip," : ""}${transform.flipV ? "vflip," : ""}`;
+
+    // Skew and perspective are non-affine warps that the canvas engines (preview + WebCodecs)
+    // render, but there's no clean, verifiable ffmpeg equivalent that stays aligned with the
+    // rest of this graph — so they're intentionally omitted here, like glow/shadow.
     filterLines.push(
-      `[${partIndex}:v]${shiftPrefix}${fxPrefix}scale=${Math.max(2, Math.round(drawW))}:${Math.max(2, Math.round(drawH))},format=rgba,` +
+      `[${partIndex}:v]${shiftPrefix}${fxPrefix}${cropped}${flip}scale=${Math.max(2, Math.round(drawW))}:${Math.max(2, Math.round(drawH))},format=rgba,` +
         `rotate=${rotRad}:c=none:ow=rotw(${rotRad}):oh=roth(${rotRad}),colorchannelmixer=aa=${transform.opacity}[${label}]`
     );
+
+    // The overlay centres the layer; shift so the anchor point (not the centre) lands at the
+    // target position. The anchor offset is measured in the un-rotated layer, then rotated to
+    // match the rotate filter's expansion about the layer centre.
+    const axPx = (transform.anchorX - 0.5) * drawW;
+    const ayPx = (transform.anchorY - 0.5) * drawH;
+    const cos = Math.cos(rotRad);
+    const sin = Math.sin(rotRad);
+    const rx = cos * axPx - sin * ayPx;
+    const ry = sin * axPx + cos * ayPx;
+
     return {
       label,
-      cxPx: Math.round(transform.x * projectWidth),
-      cyPx: Math.round(transform.y * projectHeight),
+      cxPx: Math.round(transform.x * projectWidth - rx),
+      cyPx: Math.round(transform.y * projectHeight - ry),
     };
   }
 

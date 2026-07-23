@@ -17,11 +17,29 @@ export interface SourceVideo {
 }
 
 export interface Transform {
+  /** Position of the anchor point on the canvas, as a fraction of canvas size from centre. */
   x: number;
   y: number;
+  /** Uniform scale of the "contain"-fitted box. */
   scale: number;
+  /** Degrees, clockwise. */
   rotation: number;
   opacity: number;
+  /** Pivot for rotation/scale/skew, and the point that `x`/`y` positions. 0..1 within the clip box; 0.5 = centre. */
+  anchorX: number;
+  anchorY: number;
+  /** Edge insets as a fraction of the source, cropped away before fitting. */
+  cropTop: number;
+  cropRight: number;
+  cropBottom: number;
+  cropLeft: number;
+  flipH: boolean;
+  flipV: boolean;
+  /** Shear in degrees. */
+  skewX: number;
+  skewY: number;
+  /** Pseudo-3D tilt about the vertical axis, -1..1 (0 = flat). */
+  perspective: number;
 }
 
 export interface Track {

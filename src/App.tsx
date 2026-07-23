@@ -21,6 +21,7 @@ import { ActionBar } from "./components/ActionBar";
 import { ExportDialog } from "./components/ExportDialog";
 import { TransitionPanel, type TransitionSlot } from "./components/TransitionPanel";
 import { EffectsPanel } from "./components/EffectsPanel";
+import { TransformPanel } from "./components/TransformPanel";
 import { InspectorPanel, type InspectorTab } from "./components/InspectorPanel";
 import {
   clipDuration,
@@ -62,7 +63,7 @@ export default function App() {
   const [activeTransitionSlot, setActiveTransitionSlot] = useState<TransitionSlot | null>(null);
   const [draggingSourceId, setDraggingSourceId] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"media" | "inspector" | null>(null);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("effects");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("transform");
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -697,6 +698,14 @@ export default function App() {
           tab={inspectorTab}
           onTabChange={setInspectorTab}
           onClose={() => setMobilePanel(null)}
+          transform={
+            <TransformPanel
+              clip={selectedClip}
+              onChange={(t) => selectedClipId && handleTransformClip(selectedClipId, t)}
+              onBeginEdit={beginLiveEdit}
+              onEndEdit={endLiveEdit}
+            />
+          }
           effects={
             <EffectsPanel
               clip={selectedClip}
